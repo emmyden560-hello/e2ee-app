@@ -1,4 +1,4 @@
-import { generateIdentityKeys, exportPublicKey } from './crypto';
+import { generateIdentityKeys, exportPublicKey, wrapPrivateKeyWithPassword } from './crypto';
 import { savePrivateKey } from './storage';
 import { api } from './api';
 
@@ -10,9 +10,12 @@ import { api } from './api';
  * 4. Registers with backend
  * 5. Caches username for UI persistence
  */
-export async function setupNewAccount(username: string) {
+export async function setupNewAccount(username: string, password: string) {
   if (!username || !username.trim()) {
     throw new Error('Username cannot be empty');
+  }
+  if (!password || password.length < 8) {
+    throw new Error('Password must be at least 8 characters');
   }
 
   try {
@@ -27,13 +30,28 @@ export async function setupNewAccount(username: string) {
     // 3. Export Public Key to a format the backend understands (Base64)
     console.log("📤 Exporting public key...");
     const pubKeyString = await exportPublicKey(pair.publicKey);
-    
-    // 4. Register the user and their Public Key with Whisperbox
+
+    // 4. Wrap private key with password-derived AES-KW for backend storage
+    console.log("🧩 Wrapping private key...");
+    const { wrappedPrivateKey, pbkdf2Salt } = await wrapPrivateKeyWithPassword(
+      pair.privateKey,
+      password
+    );
+
+    // 5. Register with backend using required schema
     console.log("📡 Registering with backend...");
-    await api.registerUser(username.trim(), pubKeyString);
+    await api.registerUser({
+      username: username.trim(),
+      display_name: username.trim(),
+      password,
+      public_key: pubKeyString,
+      wrapped_private_key: wrappedPrivateKey,
+      pbkdf2_salt: pbkdf2Salt,
+    });
     
-    // 5. Cache the username for UI persistence
+    // 6. Cache identity material for current UI flow
     localStorage.setItem('whisper_username', username.trim());
+    localStorage.setItem('whisper_public_key', pubKeyString);
     
     console.log("✅ Account setup complete!");
     return { success: true, username: username.trim() };

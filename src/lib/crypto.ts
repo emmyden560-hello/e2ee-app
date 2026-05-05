@@ -5,7 +5,7 @@ import type { CryptoKeyPair } from '@/types';
  * 
  * Generates an RSA-2048 key pair for E2EE messaging.
  * - Public key: Can be extracted and shared with others
- * - Private key: Never extractable, stays on device
+ * - Private key: extractable for wrapping during registration/login restore
  */
 export async function generateIdentityKeys(): Promise<CryptoKeyPair> {
   try {
@@ -16,7 +16,7 @@ export async function generateIdentityKeys(): Promise<CryptoKeyPair> {
         publicExponent: new Uint8Array([1, 0, 1]), // Standard 65537 value
         hash: "SHA-256",
       },
-      false, // Private key is NOT extractable for maximum security
+      true, // Required so private key can be wrapped with password-derived AES-KW
       ["encrypt", "decrypt"]
     );
 
@@ -41,6 +41,66 @@ export async function exportPublicKey(key: CryptoKey): Promise<string> {
     const msg = error instanceof Error ? error.message : 'Failed to export public key';
     throw new Error(`Public key export failed: ${msg}`);
   }
+}
+
+function toBase64(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes));
+}
+
+/**
+ * Wrap private key with a password-derived AES-KW key (PBKDF2)
+ * so backend stores only encrypted private key material.
+ */
+export async function wrapPrivateKeyWithPassword(
+  privateKey: CryptoKey,
+  password: string
+): Promise<{ wrappedPrivateKey: string; pbkdf2Salt: string }> {
+  if (!password || password.length < 8) {
+    throw new Error('Password must be at least 8 characters');
+  }
+
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const passwordBytes = new TextEncoder().encode(password);
+
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    passwordBytes,
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+
+  const wrappingKey = await crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt,
+      iterations: 250000,
+      hash: "SHA-256",
+    },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt"]
+  );
+
+  // AES-KW requires data length multiple-of-8. PKCS#8 private key blobs are
+  // variable length, so we encrypt exported PKCS#8 bytes with AES-GCM instead.
+  const pkcs8 = await crypto.subtle.exportKey("pkcs8", privateKey);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    wrappingKey,
+    pkcs8
+  );
+
+  const packet = new Uint8Array(iv.length + encrypted.byteLength);
+  packet.set(iv, 0);
+  packet.set(new Uint8Array(encrypted), iv.length);
+
+  return {
+    wrappedPrivateKey: toBase64(packet),
+    pbkdf2Salt: toBase64(salt),
+  };
 }
 
 /**

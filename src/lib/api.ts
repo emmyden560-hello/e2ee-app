@@ -1,11 +1,27 @@
 // src/lib/api.ts
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://whisperbox.koyeb.app/api';
+function resolveBaseUrl(baseUrl: string): string {
+  // Some environments set NEXT_PUBLIC_API_BASE_URL to ".../api".
+  // WhisperBox endpoints are rooted at "/" (e.g. "/auth/register").
+  let url = (baseUrl || '').trim();
+  if (!url) url = 'https://whisperbox.koyeb.app';
+  if (url.endsWith('/')) url = url.slice(0, -1);
+  if (url.toLowerCase().endsWith('/api')) url = url.slice(0, -4);
+  return url;
+}
+
+const BASE_URL = resolveBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL || 'https://whisperbox.koyeb.app');
 
 // Type definitions
 interface RegisterResponse {
-  success: boolean;
-  message?: string;
-  id?: string;
+  access_token?: string;
+  refresh_token?: string;
+  token_type?: string;
+  expires_in?: number;
+  user?: {
+    id: string;
+    username: string;
+    display_name: string;
+  };
 }
 
 interface PublicKeyResponse {
@@ -35,6 +51,12 @@ function parseErrorResponse(status: number, errorData: any): string {
   }
 
   if (typeof errorData === 'object') {
+    if (Array.isArray(errorData.detail)) {
+      const messages = errorData.detail
+        .map((d: any) => `${d.loc?.join('.') || 'field'}: ${d.msg || 'invalid value'}`)
+        .join('; ');
+      if (messages) return messages;
+    }
     return errorData.error || errorData.message || `HTTP ${status}`;
   }
 
@@ -42,28 +64,35 @@ function parseErrorResponse(status: number, errorData: any): string {
 }
 
 export const api = {
-  registerUser: async (username: string, publicKey: string): Promise<RegisterResponse> => {
-    if (!username || !publicKey) {
-      throw new Error('Username and public key are required');
+  registerUser: async (payload: {
+    username: string;
+    display_name: string;
+    password: string;
+    public_key: string;
+    wrapped_private_key: string;
+    pbkdf2_salt: string;
+  }): Promise<RegisterResponse> => {
+    if (!payload.username || !payload.public_key || !payload.password) {
+      throw new Error('Missing required registration fields');
     }
 
-    console.log("📤 Sending Registration:", { username, public_key_length: publicKey.length });
+    console.log("📤 Sending Registration:", { username: payload.username, public_key_length: payload.public_key.length });
 
     try {
-      const res = await fetch(`${BASE_URL}/register`, {
+      const res = await fetch(`${BASE_URL}/auth/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
-        body: JSON.stringify({
-          username: username.trim(),
-          public_key: publicKey
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
         let errorMessage = `HTTP ${res.status}`;
+        if (res.status === 409) {
+          throw new Error('Username is already taken. Please choose another username.');
+        }
         try {
           const contentType = res.headers.get('content-type');
           if (contentType?.includes('application/json')) {
@@ -202,6 +231,10 @@ export const api = {
     }
 
     try {
+      // Legacy inbox endpoint is not available on the current backend API.
+      // Return empty for now until conversation/token API migration is implemented.
+      return [];
+
       const encodedUsername = encodeURIComponent(username.trim());
       const res = await fetch(`${BASE_URL}/messages/inbox/${encodedUsername}`, {
         method: 'GET',

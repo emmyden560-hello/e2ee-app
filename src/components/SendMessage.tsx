@@ -14,16 +14,12 @@ export default function SendMessage({ sender }: { sender: string }) {
 
     // Load sender's public key on component mount
     useEffect(() => {
-        const loadSenderKey = async () => {
-            try {
-                const pubKey = await api.getPublicKey(sender);
-                setSenderPubKey(pubKey);
-            } catch (err) {
-                console.error("Failed to load sender public key:", err);
-                setError('Could not load your public key. Please refresh the page.');
-            }
-        };
-        loadSenderKey();
+        const localPub = localStorage.getItem('whisper_public_key');
+        if (localPub) {
+            setSenderPubKey(localPub);
+            return;
+        }
+        setError('Could not load your local public key. Please reset identity and register again.');
     }, [sender]);
 
     const handleSend = async (e: React.FormEvent) => {
@@ -57,33 +53,36 @@ export default function SendMessage({ sender }: { sender: string }) {
             alert("Message sent securely! ✅");
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : 'Failed to send message';
-            console.error("Send error:", err);
-            setError(errorMsg);
+            if (errorMsg.includes('not found')) {
+                setError(`Recipient "${recipient.trim()}" does not exist. Check the username and try again.`);
+            } else {
+                setError(errorMsg);
+            }
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm mb-8">
-            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                <Send className="w-4 h-4 text-blue-500" /> New Secure Message
+        <div className="bg-white border border-gray-200 p-5 rounded space-y-4">
+            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <Send className="w-4 h-4 text-gray-700" /> Send Secure Message
             </h3>
 
             {error && (
-                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
+                <div className="p-3 bg-red-50 border border-red-200 rounded flex items-start gap-2">
                     <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
-                    <p className="text-sm text-red-700">{error}</p>
+                    <p className="text-xs text-red-700">{error}</p>
                 </div>
             )}
 
-            <form onSubmit={handleSend} className="space-y-4">
+            <form onSubmit={handleSend} className="space-y-3">
                 <div className="relative">
-                    <User className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                    <User className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
                     <input
                         type="text"
-                        placeholder="Recipient Username"
-                        className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                        placeholder="Recipient username"
+                        className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
                         value={recipient}
                         onChange={(e) => {
                             setRecipient(e.target.value);
@@ -93,8 +92,8 @@ export default function SendMessage({ sender }: { sender: string }) {
                     />
                 </div>
                 <textarea
-                    placeholder="Type your secret message..."
-                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 h-24 resize-none disabled:opacity-50"
+                    placeholder="Your message..."
+                    className="w-full p-3 bg-gray-50 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent h-20 resize-none disabled:opacity-50 font-normal"
                     value={text}
                     onChange={(e) => {
                         setText(e.target.value);
@@ -105,7 +104,7 @@ export default function SendMessage({ sender }: { sender: string }) {
                 <button
                     type="submit"
                     disabled={loading || !senderPubKey || !recipient.trim() || !text.trim()}
-                    className="w-full bg-slate-900 text-white py-3 rounded-lg font-medium flex items-center justify-center gap-2 hover:bg-black transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full bg-blue-600 text-white py-2 rounded text-sm font-medium flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                     {loading ? (
                         <>
@@ -120,7 +119,7 @@ export default function SendMessage({ sender }: { sender: string }) {
                     ) : (
                         <>
                             <Lock className="w-4 h-4" />
-                            Encrypt & Send
+                            Send
                         </>
                     )}
                 </button>

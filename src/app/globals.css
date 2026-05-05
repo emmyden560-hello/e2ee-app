@@ -2,7 +2,11 @@
 
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #222222;
+  --telegram-blue: #0088CC;
+  --light-gray: #F5F5F5;
+  --border-gray: #E5E5E5;
+  --secondary-text: #999999;
 }
 
 @theme inline {
@@ -22,5 +26,12 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--font-geist-mono), monospace;
 }

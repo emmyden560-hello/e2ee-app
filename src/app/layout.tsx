@@ -13,8 +13,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Whisper Box",
+  title: "End-To-End Encrypted Messaging",
   description: "Stage 4B task - HNG - E2EE app",
+    icons: {
+      icon: '/favicon.svg.png',
+    }
 };
 
 export default function RootLayout({
