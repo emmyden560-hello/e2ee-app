@@ -130,15 +130,25 @@ export const api = {
     }
 
     try {
-      const encodedUsername = encodeURIComponent(username.trim());
+      const cleanUsername = username.trim().toLowerCase();
+      const encodedUsername = encodeURIComponent(cleanUsername);
+      
+      console.log(`🔍 Fetching public key for: "${cleanUsername}"`);
+      console.log(`📍 API URL: ${BASE_URL}/users/public-key/${encodedUsername}`);
+      
       const res = await fetch(`${BASE_URL}/users/public-key/${encodedUsername}`, {
         method: 'GET',
-        headers: { 'Accept': 'application/json' },
+        headers: { 
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
       });
+
+      console.log(`📊 Response status: ${res.status}`);
 
       if (!res.ok) {
         if (res.status === 404) {
-          throw new Error(`User "${username}" not found`);
+          throw new Error(`User "${username}" not found on the server. Make sure the username exists and is spelled correctly.`);
         }
 
         let errorMessage = `HTTP ${res.status}`;
@@ -146,6 +156,7 @@ export const api = {
           const contentType = res.headers.get('content-type');
           if (contentType?.includes('application/json')) {
             const errorData = await res.json();
+            console.error('Error details:', errorData);
             errorMessage = parseErrorResponse(res.status, errorData);
           } else {
             const errorText = await res.text();
@@ -159,13 +170,16 @@ export const api = {
       }
 
       const data: PublicKeyResponse = await res.json();
+      console.log(`✅ Public key fetched successfully for ${username}`);
+      
       if (!data.public_key) {
         throw new Error('Server returned no public key');
       }
       return data.public_key;
     } catch (error) {
       if (error instanceof TypeError) {
-        throw new Error('Network error: Unable to reach the server');
+        console.error('Network error:', error);
+        throw new Error('Network error: Unable to reach the server. Check your internet connection and make sure the API URL is correct.');
       }
       if (error instanceof Error) {
         throw error;
@@ -180,18 +194,30 @@ export const api = {
     }
 
     try {
+      const cleanSender = sender.trim().toLowerCase();
+      const cleanRecipient = recipient.trim().toLowerCase();
+      
+      console.log(`📨 Sending message from "${cleanSender}" to "${cleanRecipient}"`);
+      console.log(`📍 API URL: ${BASE_URL}/messages/send`);
+
+      const payload = {
+        sender: cleanSender,
+        recipient: cleanRecipient,
+        message: encryptedMessage,
+      };
+
+      console.log('📤 Payload:', { sender: cleanSender, recipient: cleanRecipient, message: '(encrypted)' });
+
       const res = await fetch(`${BASE_URL}/messages/send`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
-        body: JSON.stringify({
-          sender: sender.trim(),
-          recipient: recipient.trim(),
-          message: encryptedMessage,
-        }),
+        body: JSON.stringify(payload),
       });
+
+      console.log(`📊 Response status: ${res.status}`);
 
       if (!res.ok) {
         let errorMessage = `HTTP ${res.status}`;
@@ -199,6 +225,7 @@ export const api = {
           const contentType = res.headers.get('content-type');
           if (contentType?.includes('application/json')) {
             const errorData = await res.json();
+            console.error('Error details:', errorData);
             errorMessage = parseErrorResponse(res.status, errorData);
           } else {
             const errorText = await res.text();
@@ -216,7 +243,8 @@ export const api = {
       return data;
     } catch (error) {
       if (error instanceof TypeError) {
-        throw new Error('Network error: Unable to reach the server');
+        console.error('Network error:', error);
+        throw new Error('Network error: Unable to reach the server. Check your internet connection.');
       }
       if (error instanceof Error) {
         throw error;
@@ -231,11 +259,11 @@ export const api = {
     }
 
     try {
-      // Legacy inbox endpoint is not available on the current backend API.
-      // Return empty for now until conversation/token API migration is implemented.
-      return [];
+      const cleanUsername = username.trim().toLowerCase();
+      const encodedUsername = encodeURIComponent(cleanUsername);
+      
+      console.log(`📬 Fetching messages for: "${cleanUsername}"`);
 
-      const encodedUsername = encodeURIComponent(username.trim());
       const res = await fetch(`${BASE_URL}/messages/inbox/${encodedUsername}`, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
@@ -243,7 +271,7 @@ export const api = {
 
       if (!res.ok) {
         if (res.status === 404) {
-          // No messages yet is not an error
+          console.warn(`No messages endpoint available or no messages yet`);
           return [];
         }
 
@@ -261,13 +289,16 @@ export const api = {
           console.warn("Could not parse error response:", e);
         }
 
+        console.error('Error fetching messages:', errorMessage);
         throw new Error(errorMessage);
       }
 
       const data = await res.json();
+      console.log(`✅ Fetched ${Array.isArray(data) ? data.length : 0} messages`);
       return Array.isArray(data) ? data : data.messages || [];
     } catch (error) {
       if (error instanceof TypeError) {
+        console.error('Network error:', error);
         throw new Error('Network error: Unable to reach the server');
       }
       if (error instanceof Error) {
