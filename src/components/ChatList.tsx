@@ -28,9 +28,11 @@ export default function ChatList({
     const [filteredConversations, setFilteredConversations] = useState(conversations);
 
     useEffect(() => {
-        const filtered = conversations.filter(conv =>
-            conv.name.toLowerCase().includes(searchQuery.toLowerCase())
-        );
+        const filtered = conversations.filter(conv => {
+            const name = conv.name || '';
+            const query = searchQuery || '';
+            return name.toLowerCase().includes(query.toLowerCase());
+        });
         setFilteredConversations(filtered);
     }, [searchQuery, conversations]);
 
