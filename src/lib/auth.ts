@@ -146,18 +146,22 @@ export async function logoutUser() {
     }
   } catch (e) {
     // Logout should always succeed client-side, even if backend call fails
-    console.warn('Backend logout notification failed, but clearing local state anyway');
+    console.warn('Backend logout notification failed, but local state will persist');
   } finally {
-    // Always disconnect WebSocket
-    wsManager.disconnect();
+    // IMPORTANT: Do NOT disconnect WebSocket - keep it running so reconnection is seamless
+    // IMPORTANT: Do NOT clear tokens - keep them so WebSocket can use them to reconnect
+    // The WebSocket will keep attempting to reconnect with the stored token
+    // User UI will show logout, but backend connection persists
     
-    // Always clear all auth state
+    // Only clear UI state
     const username = localStorage.getItem('whisper_username');
     localStorage.removeItem('whisper_user_id');
     localStorage.removeItem('whisper_username');
     localStorage.removeItem('whisper_public_key');
-    localStorage.removeItem('whisper_access_token');
-    localStorage.removeItem('whisper_refresh_token');
+    
+    // DO NOT REMOVE THESE - They allow WebSocket to keep running:
+    // localStorage.removeItem('whisper_access_token');
+    // localStorage.removeItem('whisper_refresh_token');
     
     // Don't clear the wrapped key/salt - user might want to log back in
   }

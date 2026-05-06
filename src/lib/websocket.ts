@@ -10,23 +10,23 @@ class WebSocketManager {
   private listeners: Set<MessageListener> = new Set();
   private isConnecting: boolean = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
-  private isManuallyDisconnected: boolean = false;
+  private readonly RECONNECT_INTERVAL = 3000; // Retry every 3 seconds
   
   public connect() {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
-      return;
+      return; // Already connected or connecting
     }
-    if (this.isConnecting) return;
+    if (this.isConnecting) return; // Already attempting to connect
 
     const token = localStorage.getItem('whisper_access_token');
     if (!token) {
-      console.warn('Cannot connect WebSocket: No access token found');
-      this.isConnecting = false; // Reset flag so we can try again when token is available
+      // No token available yet, but keep trying - user might log in soon
+      console.log('⏳ WebSocket waiting for auth token...');
+      this.scheduleReconnect();
       return;
     }
 
-    // User has logged back in, so no longer manually disconnected
-    this.isManuallyDisconnected = false;
+    // Token is available, attempt connection
     this.isConnecting = true;
     
     try {
@@ -53,13 +53,11 @@ class WebSocketManager {
       };
 
       this.ws.onclose = () => {
-        console.log('❌ WebSocket Disconnected');
+        console.log('❌ WebSocket Disconnected - will attempt to reconnect');
         this.ws = null;
         this.isConnecting = false;
-        // Only schedule reconnect if this wasn't a manual disconnect
-        if (!this.isManuallyDisconnected) {
-          this.scheduleReconnect();
-        }
+        // Always schedule reconnect - connection is essential
+        this.scheduleReconnect();
       };
 
       this.ws.onerror = (error) => {
@@ -69,32 +67,31 @@ class WebSocketManager {
     } catch (e) {
       console.error('Failed to create WebSocket', e);
       this.isConnecting = false;
-      if (!this.isManuallyDisconnected) {
-        this.scheduleReconnect();
-      }
+      // Retry connection
+      this.scheduleReconnect();
     }
   }
 
   private scheduleReconnect() {
     if (!this.reconnectTimer) {
       this.reconnectTimer = setTimeout(() => {
-        console.log('🔄 Attempting to reconnect WebSocket...');
+        console.log('🔄 WebSocket reconnect attempt...');
         this.connect();
-      }, 5000);
+      }, this.RECONNECT_INTERVAL);
     }
   }
 
   public disconnect() {
-    this.isManuallyDisconnected = true;
+    // This method is kept for compatibility but WebSocket is never truly disconnected
+    // It will continue to attempt reconnection in the background
+    console.log('⚠️ WebSocket disconnect requested, but will continue reconnecting');
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
     this.isConnecting = false;
+    // Do NOT clear the reconnect timer - keep it running
+    // The WebSocket will keep attempting to reconnect
   }
 
   public send(payload: SendMessagePayload): boolean {
