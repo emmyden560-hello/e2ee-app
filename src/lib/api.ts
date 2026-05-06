@@ -180,11 +180,20 @@ export const api = {
   },
 
   logoutUser: async (refresh_token: string): Promise<void> => {
-    await fetch(`${BASE_URL}/auth/logout`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ refresh_token }),
-    }).catch(e => console.error('Logout error:', e));
+    try {
+      const res = await fetch(`${BASE_URL}/auth/logout`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ refresh_token }),
+      });
+      // Don't throw on error - logout should succeed even if endpoint fails
+      if (!res.ok) {
+        console.warn(`Logout endpoint returned ${res.status}: ${await res.text()}`);
+      }
+    } catch (e) {
+      // Network errors are OK during logout - we'll clear state anyway
+      console.warn('Logout request failed (this is OK):', e instanceof Error ? e.message : e);
+    }
   },
 
   searchUsers: async (query: string): Promise<UserProfile[]> => {
@@ -263,21 +272,6 @@ export const api = {
       return await res.json();
     } catch (error) {
       throw new Error(handleFetchError(error, '/messages'));
-    }
-  },
-
-  getUserProfile: async (userId: string): Promise<any> => {
-    try {
-      const encodedId = encodeURIComponent(userId);
-      const res = await fetch(`${BASE_URL}/users/${encodedId}`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-      });
-
-      if (!res.ok) throw new Error(await parseError(res));
-      return await res.json();
-    } catch (error) {
-      throw new Error(handleFetchError(error, `/users/${userId}`));
     }
   },
 };

@@ -11,11 +11,11 @@ import { api, UserProfile, Conversation } from '@/lib/api';
 import { logoutUser } from '@/lib/auth';
 
 interface LocalConversation {
-    id: string;
-    name: string;
-    lastMessage?: string;
-    timestamp?: string;
-    unread?: number;
+  id: string;
+  name: string;
+  lastMessage?: string;
+  timestamp?: string;
+  unread?: number;
 }
 
 export default function Home() {
@@ -32,7 +32,7 @@ export default function Home() {
     setMounted(true);
     const savedUser = localStorage.getItem('whisper_username');
     const token = localStorage.getItem('whisper_access_token');
-    
+
     if (savedUser && token) {
       setCurrentUser(savedUser);
       loadConversations();
@@ -78,7 +78,7 @@ export default function Home() {
       };
       setConversations([newConversation, ...conversations]);
     }
-    
+
     setSelectedChat(user.id);
     setShowNewChat(false);
     setSearchQuery('');
@@ -89,8 +89,17 @@ export default function Home() {
     if (confirm('Are you sure you want to log out?')) {
       try {
         await logoutUser();
+      } catch (e) {
+        console.error('Logout error:', e);
       } finally {
+        // Always set currentUser to null to trigger UI update
         setCurrentUser(null);
+        // Clear all state
+        setConversations([]);
+        setSelectedChat(null);
+        setShowNewChat(false);
+        setSearchQuery('');
+        setSearchResults([]);
       }
     }
   };
@@ -188,7 +197,7 @@ export default function Home() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg p-6 max-w-sm w-full max-h-[80vh] flex flex-col">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Start New Chat</h3>
-            
+
             <div className="flex gap-2 mb-4">
               <input
                 type="text"

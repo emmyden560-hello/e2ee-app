@@ -36,11 +36,16 @@ export async function setupNewAccount(username: string, password: string) {
     });
     
     // Cache identity material and tokens
+    const cleanUsername = username.trim();
     localStorage.setItem('whisper_user_id', response.user.id);
     localStorage.setItem('whisper_username', response.user.username);
     localStorage.setItem('whisper_public_key', pubKeyString);
     localStorage.setItem('whisper_access_token', response.access_token);
     localStorage.setItem('whisper_refresh_token', response.refresh_token);
+    
+    // Store key material locally for login retrieval (backend may not return it)
+    localStorage.setItem(`whisper_wrapped_key_${cleanUsername}`, wrappedPrivateKey);
+    localStorage.setItem(`whisper_salt_${cleanUsername}`, pbkdf2Salt);
     
     // Connect WebSocket
     wsManager.connect();
@@ -66,66 +71,64 @@ export async function loginExistingAccount(username: string, password: string) {
   }
 
   try {
-    const response = await api.loginUser(username.trim(), password);
+    const cleanUsername = username.trim();
+    const response = await api.loginUser(cleanUsername, password);
     
     // Validate response has required auth fields
     if (!response.access_token || !response.refresh_token) {
       throw new Error("Invalid login response: missing authentication tokens");
     }
     
-    // Cache tokens first so we can make authenticated requests
-    localStorage.setItem('whisper_user_id', response.user.id);
-    localStorage.setItem('whisper_username', response.user.username);
-    localStorage.setItem('whisper_access_token', response.access_token);
-    localStorage.setItem('whisper_refresh_token', response.refresh_token);
-    
-    // Get key material from response or fetch if not provided
+    // Get key material from response or localStorage
     let wrappedPrivateKey = response.wrapped_private_key;
     let pbkdf2Salt = response.pbkdf2_salt;
     
+    // If backend didn't return key material, try to retrieve from localStorage (stored during registration)
     if (!wrappedPrivateKey || !pbkdf2Salt) {
-      // Try to fetch user profile which might have key material
-      try {
-        const profileRes = await api.getUserProfile(response.user.id);
-        wrappedPrivateKey = profileRes.wrapped_private_key;
-        pbkdf2Salt = profileRes.pbkdf2_salt;
-      } catch (e) {
-        // If fetch fails, clear tokens and throw
-        localStorage.removeItem('whisper_user_id');
-        localStorage.removeItem('whisper_username');
-        localStorage.removeItem('whisper_access_token');
-        localStorage.removeItem('whisper_refresh_token');
-        throw new Error("Server did not return encryption key material. Please try again or contact support.");
-      }
+      wrappedPrivateKey = localStorage.getItem(`whisper_wrapped_key_${cleanUsername}`);
+      pbkdf2Salt = localStorage.getItem(`whisper_salt_${cleanUsername}`);
     }
     
     if (!wrappedPrivateKey || !pbkdf2Salt) {
-      // Clear tokens if key material is still missing
-      localStorage.removeItem('whisper_user_id');
-      localStorage.removeItem('whisper_username');
-      localStorage.removeItem('whisper_access_token');
-      localStorage.removeItem('whisper_refresh_token');
-      throw new Error("Server did not return encryption key material. Please try again or contact support.");
+      throw new Error("Encryption key material not found. Please register a new account or contact support.");
     }
     
-    const privateKey = await unwrapPrivateKey(
-      wrappedPrivateKey,
-      pbkdf2Salt,
-      password
-    );
+    // Unwrap private key with password before storing tokens
+    let privateKey;
+    try {
+      privateKey = await unwrapPrivateKey(
+        wrappedPrivateKey,
+        pbkdf2Salt,
+        password
+      );
+    } catch (unwrapError) {
+      throw new Error("Incorrect password or corrupted key material.");
+    }
     
+    // Store private key securely
     await savePrivateKey(privateKey);
     
     // Fetch user's public key (to cache it locally like during registration)
     const pubKeyString = await api.getPublicKey(response.user.id);
     
+    // Cache identity material and tokens (only after successful key unwrap)
+    localStorage.setItem('whisper_user_id', response.user.id);
+    localStorage.setItem('whisper_username', response.user.username);
     localStorage.setItem('whisper_public_key', pubKeyString);
+    localStorage.setItem('whisper_access_token', response.access_token);
+    localStorage.setItem('whisper_refresh_token', response.refresh_token);
     
-    // Connect WebSocket
+    // Connect WebSocket only after successful login
     wsManager.connect();
     
     return { success: true, user: response.user };
   } catch (error) {
+    // Ensure no partial auth state is left
+    localStorage.removeItem('whisper_user_id');
+    localStorage.removeItem('whisper_username');
+    localStorage.removeItem('whisper_access_token');
+    localStorage.removeItem('whisper_refresh_token');
+    
     const errorMsg = error instanceof Error ? error.message : 'Unknown error during login';
     throw new Error(errorMsg);
   }
@@ -135,16 +138,27 @@ export async function loginExistingAccount(username: string, password: string) {
  * Log out
  */
 export async function logoutUser() {
-  const refreshToken = localStorage.getItem('whisper_refresh_token');
-  if (refreshToken) {
-    await api.logoutUser(refreshToken);
+  try {
+    const refreshToken = localStorage.getItem('whisper_refresh_token');
+    if (refreshToken) {
+      // Attempt to notify backend, but don't fail if it errors
+      await api.logoutUser(refreshToken);
+    }
+  } catch (e) {
+    // Logout should always succeed client-side, even if backend call fails
+    console.warn('Backend logout notification failed, but clearing local state anyway');
+  } finally {
+    // Always disconnect WebSocket
+    wsManager.disconnect();
+    
+    // Always clear all auth state
+    const username = localStorage.getItem('whisper_username');
+    localStorage.removeItem('whisper_user_id');
+    localStorage.removeItem('whisper_username');
+    localStorage.removeItem('whisper_public_key');
+    localStorage.removeItem('whisper_access_token');
+    localStorage.removeItem('whisper_refresh_token');
+    
+    // Don't clear the wrapped key/salt - user might want to log back in
   }
-  
-  wsManager.disconnect();
-  
-  localStorage.removeItem('whisper_user_id');
-  localStorage.removeItem('whisper_username');
-  localStorage.removeItem('whisper_public_key');
-  localStorage.removeItem('whisper_access_token');
-  localStorage.removeItem('whisper_refresh_token');
 }
