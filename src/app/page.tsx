@@ -31,9 +31,15 @@ export default function Home() {
   useEffect(() => {
     setMounted(true);
     const savedUser = localStorage.getItem('whisper_username');
-    if (savedUser) {
+    const token = localStorage.getItem('whisper_access_token');
+    
+    if (savedUser && token) {
       setCurrentUser(savedUser);
       loadConversations();
+    } else {
+      // Clear legacy state so the user is forced to log in or register
+      localStorage.removeItem('whisper_username');
+      setCurrentUser(null);
     }
   }, []);
 
