@@ -265,4 +265,19 @@ export const api = {
       throw new Error(handleFetchError(error, '/messages'));
     }
   },
+
+  getUserProfile: async (userId: string): Promise<any> => {
+    try {
+      const encodedId = encodeURIComponent(userId);
+      const res = await fetch(`${BASE_URL}/users/${encodedId}`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      });
+
+      if (!res.ok) throw new Error(await parseError(res));
+      return await res.json();
+    } catch (error) {
+      throw new Error(handleFetchError(error, `/users/${userId}`));
+    }
+  },
 };
