@@ -3,65 +3,89 @@
 import { useState, useEffect } from 'react';
 import Onboarding from '@/components/Onboarding';
 import SendMessage from '@/components/SendMessage';
-import { Lock, LogOut, Settings } from 'lucide-react';
+import { Lock, LogOut, Settings, Search, UserPlus } from 'lucide-react';
 import Inbox from '@/components/Inbox';
 import ChatList from '@/components/ChatList';
 import { deletePrivateKey } from '@/lib/storage';
+import { api, UserProfile, Conversation } from '@/lib/api';
+import { logoutUser } from '@/lib/auth';
 
-interface Conversation {
+interface LocalConversation {
     id: string;
     name: string;
     lastMessage?: string;
     timestamp?: string;
+    unread?: number;
 }
 
 export default function Home() {
   const [currentUser, setCurrentUser] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversations, setConversations] = useState<LocalConversation[]>([]);
   const [showNewChat, setShowNewChat] = useState(false);
-  const [newChatUsername, setNewChatUsername] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<UserProfile[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   useEffect(() => {
     setMounted(true);
     const savedUser = localStorage.getItem('whisper_username');
-    if (savedUser) setCurrentUser(savedUser);
+    if (savedUser) {
+      setCurrentUser(savedUser);
+      loadConversations();
+    }
   }, []);
 
-  const handleAddNewChat = async () => {
-    if (!newChatUsername.trim()) return;
-    
-    const exists = conversations.find(c => c.name.toLowerCase() === newChatUsername.toLowerCase());
-    if (exists) {
-      setSelectedChat(exists.id);
-      setNewChatUsername('');
-      setShowNewChat(false);
-      return;
+  const loadConversations = async () => {
+    try {
+      const convs = await api.getConversations();
+      setConversations(convs.map(c => ({
+        id: c.user_id,
+        name: c.display_name || c.username,
+        timestamp: c.last_message_at ? new Date(c.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : undefined,
+      })));
+    } catch (e) {
+      console.error('Failed to load conversations', e);
     }
+  };
 
-    const newConversation: Conversation = {
-      id: newChatUsername.toLowerCase(),
-      name: newChatUsername.trim(),
-      lastMessage: 'No messages yet',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
+  const handleSearchUsers = async () => {
+    if (!searchQuery.trim()) return;
+    setIsSearching(true);
+    try {
+      const results = await api.searchUsers(searchQuery);
+      setSearchResults(results);
+    } catch (e) {
+      console.error('Failed to search users', e);
+    } finally {
+      setIsSearching(false);
+    }
+  };
 
-    setConversations([newConversation, ...conversations]);
-    setSelectedChat(newConversation.id);
-    setNewChatUsername('');
+  const handleStartChat = (user: UserProfile) => {
+    const exists = conversations.find(c => c.id === user.id);
+    if (!exists) {
+      const newConversation: LocalConversation = {
+        id: user.id,
+        name: user.display_name || user.username,
+      };
+      setConversations([newConversation, ...conversations]);
+    }
+    
+    setSelectedChat(user.id);
     setShowNewChat(false);
+    setSearchQuery('');
+    setSearchResults([]);
   };
 
   const handleReset = async () => {
-    if (confirm('This will delete your local keys and username. Are you sure?')) {
+    if (confirm('Are you sure you want to log out?')) {
       try {
-        await deletePrivateKey();
+        await logoutUser();
       } finally {
-        localStorage.removeItem('whisper_username');
-        localStorage.removeItem('whisper_public_key');
+        setCurrentUser(null);
       }
-      setCurrentUser(null);
     }
   };
 
@@ -70,7 +94,10 @@ export default function Home() {
   }
 
   if (!currentUser) {
-    return <Onboarding onComplete={(name) => setCurrentUser(name)} />;
+    return <Onboarding onComplete={(name) => {
+      setCurrentUser(name);
+      loadConversations();
+    }} />;
   }
 
   return (
@@ -81,17 +108,11 @@ export default function Home() {
           <h1 className="text-xl font-bold">WhisperBox</h1>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => { }}
-            className="p-2 hover:bg-green-600 rounded-full transition-colors"
-            title="Settings"
-          >
-            <Settings className="w-5 h-5" />
-          </button>
+          <span className="mr-4 text-sm font-medium">@{currentUser}</span>
           <button
             onClick={handleReset}
             className="p-2 hover:bg-green-600 rounded-full transition-colors"
-            title="Reset account"
+            title="Log out"
           >
             <LogOut className="w-5 h-5" />
           </button>
@@ -111,7 +132,7 @@ export default function Home() {
 
       {/* Layout Container */}
       <div className="flex flex-1 overflow-hidden md:pt-16">
-        {/* Chat List Sidebar - Hidden on mobile when chat is selected, visible on desktop */}
+        {/* Chat List Sidebar */}
         <div className={`${selectedChat && 'md:block hidden md:flex'} ${!selectedChat && 'flex'} flex-col`}>
           <ChatList
             conversations={conversations}
@@ -121,7 +142,7 @@ export default function Home() {
           />
         </div>
 
-        {/* Main Chat Area - Hidden on mobile when no chat selected, visible on desktop */}
+        {/* Main Chat Area */}
         <div className={`${!selectedChat && 'md:flex hidden md:flex-col'} ${selectedChat && 'flex'} flex-col flex-1 overflow-hidden`}>
           {selectedChat ? (
             <>
@@ -139,7 +160,7 @@ export default function Home() {
               </div>
 
               {/* Messages Area */}
-              <Inbox username={currentUser} />
+              <Inbox recipientId={selectedChat} />
 
               {/* Send Message Area */}
               <SendMessage sender={currentUser} recipient={selectedChat} />
@@ -158,34 +179,68 @@ export default function Home() {
 
       {/* New Chat Modal */}
       {showNewChat && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-sm w-full mx-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-6 max-w-sm w-full max-h-[80vh] flex flex-col">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Start New Chat</h3>
-            <input
-              type="text"
-              placeholder="Enter username"
-              value={newChatUsername}
-              onChange={(e) => setNewChatUsername(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddNewChat()}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent mb-4"
-              autoFocus
-            />
-            <div className="flex gap-2">
+            
+            <div className="flex gap-2 mb-4">
+              <input
+                type="text"
+                placeholder="Search username..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearchUsers()}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                autoFocus
+              />
+              <button
+                onClick={handleSearchUsers}
+                disabled={!searchQuery.trim() || isSearching}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors disabled:opacity-50"
+              >
+                <Search className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto mb-4 min-h-[150px]">
+              {isSearching ? (
+                <div className="text-center py-4 text-gray-500 text-sm">Searching...</div>
+              ) : searchResults.length > 0 ? (
+                <ul className="space-y-2">
+                  {searchResults.map(user => (
+                    <li key={user.id}>
+                      <button
+                        onClick={() => handleStartChat(user)}
+                        className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg border border-gray-100 transition-colors text-left"
+                      >
+                        <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                          <UserPlus className="w-5 h-5 text-green-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-gray-900 truncate">{user.display_name}</p>
+                          <p className="text-sm text-gray-500 truncate">@{user.username}</p>
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="text-center py-8 text-gray-500 text-sm">
+                  {searchQuery ? 'No users found' : 'Search for someone to chat with'}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-gray-100">
               <button
                 onClick={() => {
                   setShowNewChat(false);
-                  setNewChatUsername('');
+                  setSearchQuery('');
+                  setSearchResults([]);
                 }}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-gray-700"
+                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-gray-700 w-full"
               >
                 Cancel
-              </button>
-              <button
-                onClick={handleAddNewChat}
-                disabled={!newChatUsername.trim()}
-                className="flex-1 px-4 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white rounded-lg transition-colors"
-              >
-                Start Chat
               </button>
             </div>
           </div>
