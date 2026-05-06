@@ -32,8 +32,10 @@ export default function Onboarding({ onComplete }: { onComplete: (username: stri
                 await setupNewAccount(username.trim(), password);
             }
             setStatus('success');
+            // Use username from localStorage (which was set by auth functions)
+            const actualUsername = localStorage.getItem('whisper_username') || username.trim();
             setTimeout(() => {
-                onComplete(username.trim());
+                onComplete(actualUsername);
             }, 500);
         } catch (err) {
             console.error(err);
@@ -132,7 +134,7 @@ export default function Onboarding({ onComplete }: { onComplete: (username: stri
                             isLogin ? 'Log In' : 'Create Account'
                         )}
                     </button>
-                    
+
                     {/* Toggle Login/Register */}
                     <div className="text-center mt-4">
                         <button

@@ -30,31 +30,72 @@ export default function Home() {
 
   useEffect(() => {
     setMounted(true);
-    const savedUser = localStorage.getItem('whisper_username');
-    const token = localStorage.getItem('whisper_access_token');
+    const initializeUser = () => {
+      const savedUser = localStorage.getItem('whisper_username');
+      const token = localStorage.getItem('whisper_access_token');
 
-    if (savedUser && token) {
-      setCurrentUser(savedUser);
-      loadConversations();
-    } else {
-      // Clear legacy state so the user is forced to log in or register
-      localStorage.removeItem('whisper_username');
-      setCurrentUser(null);
-    }
+      if (savedUser && token) {
+        setCurrentUser(savedUser);
+        loadConversations();
+      } else {
+        // No saved user, show login screen
+        setCurrentUser(null);
+      }
+    };
+
+    initializeUser();
+
+    // Listen for storage changes (e.g., from other tabs or after login)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'whisper_username') {
+        initializeUser();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
   const loadConversations = async () => {
     try {
       const convs = await api.getConversations();
-      setConversations(convs.map(c => ({
-        id: c.user_id,
-        name: c.display_name || c.username,
-        timestamp: c.last_message_at ? new Date(c.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : undefined,
-      })));
+      if (convs && convs.length > 0) {
+        setConversations(convs.map(c => ({
+          id: c.user_id,
+          name: c.display_name || c.username,
+          lastMessage: c.last_message_at ? 'Message received' : undefined,
+          timestamp: c.last_message_at ? new Date(c.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : undefined,
+        })));
+      } else {
+        // No conversations yet, but don't show error
+        setConversations([]);
+      }
     } catch (e) {
-      console.error('Failed to load conversations', e);
+      console.error('Failed to load conversations:', e);
+      // Don't show error to user, just log it
     }
   };
+
+  // Periodically refresh conversations every 10 seconds
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const interval = setInterval(() => {
+      loadConversations();
+    }, 10000);
+
+    // Also listen for message-sent event to refresh conversations
+    const handleMessageSent = () => {
+      loadConversations();
+    };
+
+    window.addEventListener('message-sent', handleMessageSent);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('message-sent', handleMessageSent);
+    };
+  }, [currentUser]);
 
   const handleSearchUsers = async () => {
     if (!searchQuery.trim()) return;
@@ -110,8 +151,13 @@ export default function Home() {
 
   if (!currentUser) {
     return <Onboarding onComplete={(name) => {
-      setCurrentUser(name);
-      loadConversations();
+      // Set all auth data that was stored by the auth functions
+      const token = localStorage.getItem('whisper_access_token');
+      if (token && name) {
+        setCurrentUser(name);
+        // Load conversations after successful login
+        setTimeout(() => loadConversations(), 500);
+      }
     }} />;
   }
 

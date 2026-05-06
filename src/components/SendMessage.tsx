@@ -47,15 +47,15 @@ export default function SendMessage({ sender, recipient, onMessageSent }: SendMe
 
         try {
             console.log(`🚀 Starting message send process...`);
-            
+
             // 1. Fetch recipient's Public Key from backend
             console.log(`🔍 Step 1: Fetching recipient's public key...`);
             const recipientPubKey = await api.getPublicKey(recipient);
-            
+
             // 2. Encrypt message locally with both sender and recipient public keys
             console.log(`🔐 Step 2: Encrypting message...`);
             const encryptedPayload = await encryptMessage(text, recipientPubKey, senderPubKey);
-            
+
             // 3. Send over WebSocket with REST fallback
             console.log(`📤 Step 3: Sending encrypted message...`);
             const payload = {
@@ -69,7 +69,7 @@ export default function SendMessage({ sender, recipient, onMessageSent }: SendMe
             };
 
             const wsSuccess = wsManager.send(payload);
-            
+
             if (!wsSuccess) {
                 console.log(`⚠️ WebSocket unavailable, falling back to REST...`);
                 await api.sendRestMessage(payload);
@@ -81,10 +81,13 @@ export default function SendMessage({ sender, recipient, onMessageSent }: SendMe
             setSuccess(true);
             setTimeout(() => setSuccess(false), 3000);
             onMessageSent?.();
+
+            // Trigger conversations refresh by dispatching a custom event
+            window.dispatchEvent(new CustomEvent('message-sent'));
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : 'Failed to send message';
             console.error('❌ Error during send:', errorMsg);
-            
+
             if (errorMsg.includes('not found') || errorMsg.includes('User')) {
                 setError(`Recipient does not exist or public key not found.`);
             } else if (errorMsg.includes('Network')) {

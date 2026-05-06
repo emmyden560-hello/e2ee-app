@@ -46,12 +46,12 @@ export default function Inbox({ recipientId }: { recipientId: string }) {
                     try {
                         const isSender = msg.from_user_id === myUserId;
                         // For decryption, we need the encryptedKey. If we are the sender, we use encryptedKeyForSelf.
-                        const keyToUse = isSender && msg.payload.encryptedKeyForSelf 
-                            ? msg.payload.encryptedKeyForSelf 
+                        const keyToUse = isSender && msg.payload.encryptedKeyForSelf
+                            ? msg.payload.encryptedKeyForSelf
                             : msg.payload.encryptedKey;
 
                         const cleartext = await decryptMessage(
-                            { encryptedKey: keyToUse, ciphertext: msg.payload.ciphertext, iv: msg.payload.iv }, 
+                            { encryptedKey: keyToUse, ciphertext: msg.payload.ciphertext, iv: msg.payload.iv },
                             privKey
                         );
                         return {
@@ -85,6 +85,12 @@ export default function Inbox({ recipientId }: { recipientId: string }) {
 
     useEffect(() => {
         if (!recipientId) return;
+
+        // Reset state when changing conversations
+        setMessages([]);
+        setError('');
+        setLoading(true);
+
         fetchAndDecrypt();
 
         // Subscribe to WebSocket
@@ -95,24 +101,24 @@ export default function Inbox({ recipientId }: { recipientId: string }) {
                 try {
                     const privKey = await getPrivateKey();
                     if (!privKey) return;
-                    
+
                     const isSender = msg.from_user_id === myUserId;
-                    const keyToUse = isSender && msg.payload.encryptedKeyForSelf 
-                        ? msg.payload.encryptedKeyForSelf 
+                    const keyToUse = isSender && msg.payload.encryptedKeyForSelf
+                        ? msg.payload.encryptedKeyForSelf
                         : msg.payload.encryptedKey;
 
                     const cleartext = await decryptMessage(
-                        { encryptedKey: keyToUse, ciphertext: msg.payload.ciphertext, iv: msg.payload.iv }, 
+                        { encryptedKey: keyToUse, ciphertext: msg.payload.ciphertext, iv: msg.payload.iv },
                         privKey
                     );
-                    
+
                     const newDecryptedMsg: DecryptedMessage = {
                         id: msg.id,
                         sender: msg.from_user_id,
                         content: cleartext,
                         timestamp: msg.created_at
                     };
-                    
+
                     setMessages(prev => [...prev, newDecryptedMsg]);
                 } catch (err) {
                     console.error("Failed to decrypt incoming WS message", err);
