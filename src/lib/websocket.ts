@@ -10,6 +10,7 @@ class WebSocketManager {
   private listeners: Set<MessageListener> = new Set();
   private isConnecting: boolean = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private isManuallyDisconnected: boolean = false;
   
   public connect() {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
@@ -20,9 +21,12 @@ class WebSocketManager {
     const token = localStorage.getItem('whisper_access_token');
     if (!token) {
       console.warn('Cannot connect WebSocket: No access token found');
+      this.isConnecting = false; // Reset flag so we can try again when token is available
       return;
     }
 
+    // User has logged back in, so no longer manually disconnected
+    this.isManuallyDisconnected = false;
     this.isConnecting = true;
     
     try {
@@ -52,7 +56,10 @@ class WebSocketManager {
         console.log('❌ WebSocket Disconnected');
         this.ws = null;
         this.isConnecting = false;
-        this.scheduleReconnect();
+        // Only schedule reconnect if this wasn't a manual disconnect
+        if (!this.isManuallyDisconnected) {
+          this.scheduleReconnect();
+        }
       };
 
       this.ws.onerror = (error) => {
@@ -62,7 +69,9 @@ class WebSocketManager {
     } catch (e) {
       console.error('Failed to create WebSocket', e);
       this.isConnecting = false;
-      this.scheduleReconnect();
+      if (!this.isManuallyDisconnected) {
+        this.scheduleReconnect();
+      }
     }
   }
 
@@ -76,6 +85,7 @@ class WebSocketManager {
   }
 
   public disconnect() {
+    this.isManuallyDisconnected = true;
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -84,6 +94,7 @@ class WebSocketManager {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.isConnecting = false;
   }
 
   public send(payload: SendMessagePayload): boolean {
