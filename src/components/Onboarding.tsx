@@ -51,7 +51,7 @@ export default function Onboarding({ onComplete }: { onComplete: (username: stri
                     <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center mb-4 shadow-lg">
                         <MessageCircle className="w-8 h-8 text-white" />
                     </div>
-                    <h1 className="text-3xl font-bold text-gray-900">WhisperBox</h1>
+                    <h1 className="text-3xl font-bold text-gray-900">E2EE - Messenger</h1>
                     <p className="text-gray-500 text-center mt-3 text-sm leading-relaxed flex items-center justify-center gap-1">
                         <Lock className="w-4 h-4" /> Private & Encrypted Messaging
                     </p>

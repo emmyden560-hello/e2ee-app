@@ -44,30 +44,30 @@ export default function Inbox({ recipientId }: { recipientId: string }) {
             const decryptedList = await Promise.all(
                 encryptedData.map(async (msg: MessageData, index: number) => {
                     try {
-                        const isSender = msg.sender_id === myUserId;
-                        // For decryption, we need the encryptedKey. If we are the sender, we use encrypted_key_for_self.
-                        const keyToUse = isSender && msg.encrypted_key_for_self 
-                            ? msg.encrypted_key_for_self 
-                            : msg.encrypted_key;
+                        const isSender = msg.from_user_id === myUserId;
+                        // For decryption, we need the encryptedKey. If we are the sender, we use encryptedKeyForSelf.
+                        const keyToUse = isSender && msg.payload.encryptedKeyForSelf 
+                            ? msg.payload.encryptedKeyForSelf 
+                            : msg.payload.encryptedKey;
 
                         const cleartext = await decryptMessage(
-                            { encryptedKey: keyToUse, ciphertext: msg.ciphertext, iv: msg.iv }, 
+                            { encryptedKey: keyToUse, ciphertext: msg.payload.ciphertext, iv: msg.payload.iv }, 
                             privKey
                         );
                         return {
                             id: msg.id || `msg-${index}`,
-                            sender: msg.sender_id, // We'll just display ID for now
+                            sender: msg.from_user_id, // We'll just display ID for now
                             content: cleartext,
-                            timestamp: msg.timestamp
+                            timestamp: msg.created_at
                         };
                     } catch (err) {
-                        console.error(`Failed to decrypt message from ${msg.sender_id}:`, err);
+                        console.error(`Failed to decrypt message from ${msg.from_user_id}:`, err);
                         return {
                             id: msg.id || `msg-${index}`,
-                            sender: msg.sender_id,
+                            sender: msg.from_user_id,
                             content: "Decryption failed: This message may have been corrupted.",
                             error: true,
-                            timestamp: msg.timestamp
+                            timestamp: msg.created_at
                         };
                     }
                 })
@@ -91,26 +91,26 @@ export default function Inbox({ recipientId }: { recipientId: string }) {
         const unsubscribe = wsManager.subscribe(async (msg: WSMessageReceivePayload) => {
             const myUserId = localStorage.getItem('whisper_user_id');
             // Only process messages for the current conversation
-            if (msg.sender_id === recipientId || msg.recipient_id === recipientId) {
+            if (msg.from_user_id === recipientId || msg.to_user_id === recipientId) {
                 try {
                     const privKey = await getPrivateKey();
                     if (!privKey) return;
                     
-                    const isSender = msg.sender_id === myUserId;
-                    const keyToUse = isSender && msg.encrypted_key_for_self 
-                        ? msg.encrypted_key_for_self 
-                        : msg.encrypted_key;
+                    const isSender = msg.from_user_id === myUserId;
+                    const keyToUse = isSender && msg.payload.encryptedKeyForSelf 
+                        ? msg.payload.encryptedKeyForSelf 
+                        : msg.payload.encryptedKey;
 
                     const cleartext = await decryptMessage(
-                        { encryptedKey: keyToUse, ciphertext: msg.ciphertext, iv: msg.iv }, 
+                        { encryptedKey: keyToUse, ciphertext: msg.payload.ciphertext, iv: msg.payload.iv }, 
                         privKey
                     );
                     
                     const newDecryptedMsg: DecryptedMessage = {
                         id: msg.id,
-                        sender: msg.sender_id,
+                        sender: msg.from_user_id,
                         content: cleartext,
-                        timestamp: msg.timestamp
+                        timestamp: msg.created_at
                     };
                     
                     setMessages(prev => [...prev, newDecryptedMsg]);
@@ -118,10 +118,10 @@ export default function Inbox({ recipientId }: { recipientId: string }) {
                     console.error("Failed to decrypt incoming WS message", err);
                     setMessages(prev => [...prev, {
                         id: msg.id,
-                        sender: msg.sender_id,
+                        sender: msg.from_user_id,
                         content: "Decryption failed for incoming message.",
                         error: true,
-                        timestamp: msg.timestamp
+                        timestamp: msg.created_at
                     }]);
                 }
             }

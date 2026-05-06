@@ -33,21 +33,26 @@ export interface PublicKeyResponse {
 
 export interface MessageData {
   id: string;
-  sender_id: string;
-  recipient_id: string;
-  encrypted_key: string;
-  encrypted_key_for_self?: string;
-  ciphertext: string;
-  iv: string;
-  timestamp: string;
+  from_user_id: string;
+  to_user_id: string;
+  payload: {
+    encryptedKey: string;
+    encryptedKeyForSelf?: string;
+    ciphertext: string;
+    iv: string;
+  };
+  created_at: string;
+  delivered?: boolean;
 }
 
 export interface SendMessagePayload {
-  recipient_id: string;
-  encrypted_key: string;
-  encrypted_key_for_self: string;
-  ciphertext: string;
-  iv: string;
+  to: string;
+  payload: {
+    encrypted_key: string;
+    encrypted_key_for_self: string;
+    ciphertext: string;
+    iv: string;
+  };
 }
 
 export interface Conversation {

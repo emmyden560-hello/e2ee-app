@@ -59,11 +59,13 @@ export default function SendMessage({ sender, recipient, onMessageSent }: SendMe
             // 3. Send over WebSocket with REST fallback
             console.log(`📤 Step 3: Sending encrypted message...`);
             const payload = {
-                recipient_id: recipient,
-                encrypted_key: encryptedPayload.encryptedKey,
-                encrypted_key_for_self: encryptedPayload.encryptedKeyForSelf,
-                ciphertext: encryptedPayload.ciphertext,
-                iv: encryptedPayload.iv
+                to: recipient,
+                payload: {
+                    encrypted_key: encryptedPayload.encryptedKey,
+                    encrypted_key_for_self: encryptedPayload.encryptedKeyForSelf,
+                    ciphertext: encryptedPayload.ciphertext,
+                    iv: encryptedPayload.iv
+                }
             };
 
             const wsSuccess = wsManager.send(payload);

@@ -127,7 +127,7 @@ export default function Home() {
 
       {/* Mobile Header */}
       <div className="md:hidden bg-green-500 text-white p-4 flex justify-between items-center sticky top-0 z-20 h-16">
-        <h1 className="text-xl font-bold">WhisperBox</h1>
+        <h1 className="text-xl font-bold">E2EE - Messenger</h1>
         <button
           onClick={handleReset}
           className="p-2 hover:bg-green-600 rounded-full transition-colors"

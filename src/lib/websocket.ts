@@ -90,7 +90,8 @@ class WebSocketManager {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({
         type: 'message.send',
-        payload
+        to: payload.to,
+        payload: payload.payload
       }));
       return true;
     }
