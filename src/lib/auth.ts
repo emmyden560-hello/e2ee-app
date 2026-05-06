@@ -1,14 +1,10 @@
-import { generateIdentityKeys, exportPublicKey, wrapPrivateKeyWithPassword } from './crypto';
+import { generateIdentityKeys, exportPublicKey, wrapPrivateKeyWithPassword, unwrapPrivateKey } from './crypto';
 import { savePrivateKey } from './storage';
 import { api } from './api';
+import { wsManager } from './websocket';
 
 /**
- * High-level service to handle the full E2EE onboarding flow.
- * 1. Generates RSA Key Pair locally
- * 2. Stores Private Key securely in IndexedDB
- * 3. Exports Public Key in Base64 format
- * 4. Registers with backend
- * 5. Caches username for UI persistence
+ * Register a new account
  */
 export async function setupNewAccount(username: string, password: string) {
   if (!username || !username.trim()) {
@@ -19,28 +15,23 @@ export async function setupNewAccount(username: string, password: string) {
   }
 
   try {
-    // 1. Generate the RSA Key Pair locally
     console.log("🔐 Generating RSA key pair...");
     const pair = await generateIdentityKeys();
     
-    // 2. Securely store Private Key in IndexedDB (The Vault)
     console.log("🔒 Storing private key securely...");
     await savePrivateKey(pair.privateKey);
     
-    // 3. Export Public Key to a format the backend understands (Base64)
     console.log("📤 Exporting public key...");
     const pubKeyString = await exportPublicKey(pair.publicKey);
 
-    // 4. Wrap private key with password-derived AES-KW for backend storage
     console.log("🧩 Wrapping private key...");
     const { wrappedPrivateKey, pbkdf2Salt } = await wrapPrivateKeyWithPassword(
       pair.privateKey,
       password
     );
 
-    // 5. Register with backend using required schema
     console.log("📡 Registering with backend...");
-    await api.registerUser({
+    const response = await api.registerUser({
       username: username.trim(),
       display_name: username.trim(),
       password,
@@ -49,23 +40,92 @@ export async function setupNewAccount(username: string, password: string) {
       pbkdf2_salt: pbkdf2Salt,
     });
     
-    // 6. Cache identity material for current UI flow
-    localStorage.setItem('whisper_username', username.trim());
+    // Cache identity material and tokens
+    localStorage.setItem('whisper_user_id', response.user.id);
+    localStorage.setItem('whisper_username', response.user.username);
     localStorage.setItem('whisper_public_key', pubKeyString);
+    localStorage.setItem('whisper_access_token', response.access_token);
+    localStorage.setItem('whisper_refresh_token', response.refresh_token);
+    
+    // Connect WebSocket
+    wsManager.connect();
     
     console.log("✅ Account setup complete!");
-    return { success: true, username: username.trim() };
+    return { success: true, user: response.user };
   } catch (error) {
-    // Clean up private key if registration fails
-    try {
-      // Try to clear the failed key from storage
-      localStorage.removeItem('whisper_username');
-    } catch (cleanupErr) {
-      console.warn("Cleanup error:", cleanupErr);
-    }
-
+    localStorage.removeItem('whisper_username');
+    localStorage.removeItem('whisper_user_id');
     const errorMsg = error instanceof Error ? error.message : 'Unknown error during account setup';
     console.error("❌ Onboarding failed:", errorMsg);
     throw new Error(errorMsg);
   }
+}
+
+/**
+ * Log in to an existing account
+ */
+export async function loginExistingAccount(username: string, password: string) {
+  if (!username || !username.trim()) {
+    throw new Error('Username cannot be empty');
+  }
+  if (!password) {
+    throw new Error('Password cannot be empty');
+  }
+
+  try {
+    console.log("📡 Logging in...");
+    const response = await api.loginUser(username.trim(), password);
+    
+    if (!response.wrapped_private_key || !response.pbkdf2_salt) {
+      throw new Error("Server did not return key material required to log in.");
+    }
+    
+    console.log("🧩 Unwrapping private key...");
+    const privateKey = await unwrapPrivateKey(
+      response.wrapped_private_key,
+      response.pbkdf2_salt,
+      password
+    );
+    
+    console.log("🔒 Storing private key securely...");
+    await savePrivateKey(privateKey);
+    
+    // Fetch user's public key (to cache it locally like during registration)
+    const pubKeyString = await api.getPublicKey(response.user.id);
+    
+    // Cache identity material and tokens
+    localStorage.setItem('whisper_user_id', response.user.id);
+    localStorage.setItem('whisper_username', response.user.username);
+    localStorage.setItem('whisper_public_key', pubKeyString);
+    localStorage.setItem('whisper_access_token', response.access_token);
+    localStorage.setItem('whisper_refresh_token', response.refresh_token);
+    
+    // Connect WebSocket
+    wsManager.connect();
+    
+    console.log("✅ Login complete!");
+    return { success: true, user: response.user };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error during login';
+    console.error("❌ Login failed:", errorMsg);
+    throw new Error(errorMsg);
+  }
+}
+
+/**
+ * Log out
+ */
+export async function logoutUser() {
+  const refreshToken = localStorage.getItem('whisper_refresh_token');
+  if (refreshToken) {
+    await api.logoutUser(refreshToken);
+  }
+  
+  wsManager.disconnect();
+  
+  localStorage.removeItem('whisper_user_id');
+  localStorage.removeItem('whisper_username');
+  localStorage.removeItem('whisper_public_key');
+  localStorage.removeItem('whisper_access_token');
+  localStorage.removeItem('whisper_refresh_token');
 }

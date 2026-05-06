@@ -1,38 +1,43 @@
 'use client';
 
 import React, { useState } from 'react';
-import { setupNewAccount } from '@/lib/auth';
+import { setupNewAccount, loginExistingAccount } from '@/lib/auth';
 import { MessageCircle, Loader2, Lock, AlertCircle, CheckCircle, Eye, EyeOff } from 'lucide-react';
 
 export default function Onboarding({ onComplete }: { onComplete: (username: string) => void }) {
+    const [isLogin, setIsLogin] = useState(false);
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
-    const [status, setStatus] = useState<'idle' | 'generating' | 'error' | 'success'>('idle');
+    const [status, setStatus] = useState<'idle' | 'loading' | 'error' | 'success'>('idle');
     const [errorMessage, setErrorMessage] = useState('');
 
-    const handleJoin = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!username.trim()) {
             setErrorMessage('Please enter a username');
             return;
         }
-        if (!password || password.length < 8) {
-            setErrorMessage('Password must be at least 8 characters');
+        if (!password || (!isLogin && password.length < 8)) {
+            setErrorMessage(isLogin ? 'Please enter your password' : 'Password must be at least 8 characters');
             return;
         }
 
-        setStatus('generating');
+        setStatus('loading');
         setErrorMessage('');
         try {
-            await setupNewAccount(username.trim(), password);
+            if (isLogin) {
+                await loginExistingAccount(username.trim(), password);
+            } else {
+                await setupNewAccount(username.trim(), password);
+            }
             setStatus('success');
             setTimeout(() => {
                 onComplete(username.trim());
             }, 500);
         } catch (err) {
             console.error(err);
-            const errorMsg = err instanceof Error ? err.message : 'Failed to create account';
+            const errorMsg = err instanceof Error ? err.message : `Failed to ${isLogin ? 'login' : 'create account'}`;
             setErrorMessage(errorMsg);
             setStatus('error');
         }
@@ -61,7 +66,7 @@ export default function Onboarding({ onComplete }: { onComplete: (username: stri
                 )}
 
                 {/* Form */}
-                <form onSubmit={handleJoin} className="space-y-4">
+                <form onSubmit={handleSubmit} className="space-y-4">
                     {/* Username Input */}
                     <div>
                         <label className="block text-sm font-semibold text-gray-900 mb-2">
@@ -69,16 +74,15 @@ export default function Onboarding({ onComplete }: { onComplete: (username: stri
                         </label>
                         <input
                             type="text"
-                            placeholder="Choose your username"
+                            placeholder="Enter your username"
                             value={username}
                             onChange={(e) => {
                                 setUsername(e.target.value);
                                 setErrorMessage('');
                             }}
-                            disabled={status === 'generating'}
+                            disabled={status === 'loading'}
                             className="w-full px-4 py-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                         />
-                        <p className="text-xs text-gray-500 mt-1">This will be your unique identifier</p>
                     </div>
 
                     {/* Password Input */}
@@ -89,13 +93,13 @@ export default function Onboarding({ onComplete }: { onComplete: (username: stri
                         <div className="relative">
                             <input
                                 type={showPassword ? 'text' : 'password'}
-                                placeholder="Minimum 8 characters"
+                                placeholder={isLogin ? 'Enter your password' : 'Minimum 8 characters'}
                                 value={password}
                                 onChange={(e) => {
                                     setPassword(e.target.value);
                                     setErrorMessage('');
                                 }}
-                                disabled={status === 'generating'}
+                                disabled={status === 'loading'}
                                 className="w-full px-4 py-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                             />
                             <button
@@ -106,19 +110,18 @@ export default function Onboarding({ onComplete }: { onComplete: (username: stri
                                 {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                             </button>
                         </div>
-                        <p className="text-xs text-gray-500 mt-1">Used to secure your encryption keys</p>
                     </div>
 
                     {/* Submit Button */}
                     <button
                         type="submit"
-                        disabled={status === 'generating' || !username.trim() || password.length < 8}
+                        disabled={status === 'loading' || !username.trim() || (!isLogin && password.length < 8) || (isLogin && !password)}
                         className="w-full bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white font-semibold py-3 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:cursor-not-allowed mt-6"
                     >
-                        {status === 'generating' ? (
+                        {status === 'loading' ? (
                             <>
                                 <Loader2 className="w-5 h-5 animate-spin" />
-                                Generating Keys...
+                                {isLogin ? 'Logging in...' : 'Generating Keys...'}
                             </>
                         ) : status === 'success' ? (
                             <>
@@ -126,9 +129,25 @@ export default function Onboarding({ onComplete }: { onComplete: (username: stri
                                 Done!
                             </>
                         ) : (
-                            'Create Account'
+                            isLogin ? 'Log In' : 'Create Account'
                         )}
                     </button>
+                    
+                    {/* Toggle Login/Register */}
+                    <div className="text-center mt-4">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setIsLogin(!isLogin);
+                                setErrorMessage('');
+                                setStatus('idle');
+                            }}
+                            className="text-sm text-green-600 hover:text-green-700 font-medium"
+                            disabled={status === 'loading'}
+                        >
+                            {isLogin ? "Don't have an account? Sign up" : "Already have an account? Log in"}
+                        </button>
+                    </div>
                 </form>
 
                 {/* Info Box */}

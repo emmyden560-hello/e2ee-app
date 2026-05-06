@@ -1,7 +1,5 @@
 // src/lib/api.ts
 function resolveBaseUrl(baseUrl: string): string {
-  // Some environments set NEXT_PUBLIC_API_BASE_URL to ".../api".
-  // WhisperBox endpoints are rooted at "/" (e.g. "/auth/register").
   let url = (baseUrl || '').trim();
   if (!url) url = 'https://whisperbox.koyeb.app';
   if (url.endsWith('/')) url = url.slice(0, -1);
@@ -9,302 +7,210 @@ function resolveBaseUrl(baseUrl: string): string {
   return url;
 }
 
-const BASE_URL = resolveBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL || 'https://whisperbox.koyeb.app');
+export const BASE_URL = resolveBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL || 'https://whisperbox.koyeb.app');
 
 // Type definitions
-interface RegisterResponse {
-  access_token?: string;
-  refresh_token?: string;
-  token_type?: string;
-  expires_in?: number;
-  user?: {
-    id: string;
-    username: string;
-    display_name: string;
-  };
+export interface UserProfile {
+  id: string;
+  username: string;
+  display_name: string;
 }
 
-interface PublicKeyResponse {
+export interface AuthResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  expires_in: number;
+  user: UserProfile;
+  wrapped_private_key?: string;
+  pbkdf2_salt?: string;
+}
+
+export interface PublicKeyResponse {
   public_key: string;
   username: string;
 }
 
-interface MessageData {
+export interface MessageData {
   id: string;
-  sender: string;
-  message: string;
-  timestamp?: string;
+  sender_id: string;
+  recipient_id: string;
+  encrypted_key: string;
+  encrypted_key_for_self?: string;
+  ciphertext: string;
+  iv: string;
+  timestamp: string;
 }
 
-interface SendMessageResponse {
-  success: boolean;
-  message?: string;
-  id?: string;
+export interface SendMessagePayload {
+  recipient_id: string;
+  encrypted_key: string;
+  encrypted_key_for_self: string;
+  ciphertext: string;
+  iv: string;
+}
+
+export interface Conversation {
+  user_id: string;
+  username: string;
+  display_name: string;
+  last_message_at: string;
 }
 
 /**
  * Parse error response from backend
  */
-function parseErrorResponse(status: number, errorData: any): string {
-  if (typeof errorData === 'string') {
-    return errorData;
-  }
-
-  if (typeof errorData === 'object') {
-    if (Array.isArray(errorData.detail)) {
-      const messages = errorData.detail
-        .map((d: any) => `${d.loc?.join('.') || 'field'}: ${d.msg || 'invalid value'}`)
-        .join('; ');
-      if (messages) return messages;
+async function parseError(res: Response): Promise<string> {
+  let errorMessage = `HTTP ${res.status}`;
+  try {
+    const contentType = res.headers.get('content-type');
+    if (contentType?.includes('application/json')) {
+      const errorData = await res.json();
+      if (typeof errorData === 'object') {
+        if (Array.isArray(errorData.detail)) {
+          errorMessage = errorData.detail
+            .map((d: any) => `${d.loc?.join('.') || 'field'}: ${d.msg || 'invalid value'}`)
+            .join('; ');
+        } else {
+          errorMessage = errorData.detail || errorData.error || errorData.message || `HTTP ${res.status}`;
+        }
+      }
+    } else {
+      errorMessage = await res.text() || `HTTP ${res.status}`;
     }
-    return errorData.error || errorData.message || `HTTP ${status}`;
+  } catch (e) {
+    console.warn("Could not parse error response:", e);
   }
-
-  return `Server error: ${status}`;
+  return errorMessage;
 }
+
+// Token management helper
+const getAuthHeaders = () => {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('whisper_access_token') : null;
+  return {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
+};
 
 export const api = {
   registerUser: async (payload: {
     username: string;
     display_name: string;
-    password: string;
+    password?: string;
     public_key: string;
     wrapped_private_key: string;
     pbkdf2_salt: string;
-  }): Promise<RegisterResponse> => {
-    if (!payload.username || !payload.public_key || !payload.password) {
-      throw new Error('Missing required registration fields');
-    }
+  }): Promise<AuthResponse> => {
+    const res = await fetch(`${BASE_URL}/auth/register`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(payload),
+    });
 
-    console.log("📤 Sending Registration:", { username: payload.username, public_key_length: payload.public_key.length });
-
-    try {
-      const res = await fetch(`${BASE_URL}/auth/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        let errorMessage = `HTTP ${res.status}`;
-        if (res.status === 409) {
-          throw new Error('Username is already taken. Please choose another username.');
-        }
-        try {
-          const contentType = res.headers.get('content-type');
-          if (contentType?.includes('application/json')) {
-            const errorData = await res.json();
-            errorMessage = parseErrorResponse(res.status, errorData);
-          } else {
-            const errorText = await res.text();
-            errorMessage = errorText || `HTTP ${res.status}`;
-          }
-        } catch (e) {
-          console.warn("Could not parse error response:", e);
-        }
-
-        console.error(`❌ Registration Error:`, errorMessage);
-        throw new Error(errorMessage);
-      }
-
-      const data = await res.json();
-      console.log("✅ Registration successful:", data);
-      return data;
-    } catch (error) {
-      if (error instanceof TypeError) {
-        throw new Error('Network error: Unable to reach the server. Check your connection.');
-      }
-      if (error instanceof Error) {
-        throw error;
-      }
-      throw new Error('Unknown error during registration');
-    }
+    if (!res.ok) throw new Error(await parseError(res));
+    const data = await res.json();
+    return data;
   },
 
-  getPublicKey: async (username: string): Promise<string> => {
-    if (!username) {
-      throw new Error('Username is required');
-    }
+  loginUser: async (username: string, password?: string): Promise<AuthResponse> => {
+    // Some implementations might use form data for login, but we'll try JSON first based on instructions
+    const res = await fetch(`${BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ username, password }),
+    });
 
-    try {
-      const cleanUsername = username.trim().toLowerCase();
-      const encodedUsername = encodeURIComponent(cleanUsername);
-      
-      console.log(`🔍 Fetching public key for: "${cleanUsername}"`);
-      console.log(`📍 API URL: ${BASE_URL}/users/public-key/${encodedUsername}`);
-      
-      const res = await fetch(`${BASE_URL}/users/public-key/${encodedUsername}`, {
-        method: 'GET',
-        headers: { 
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        },
-      });
-
-      console.log(`📊 Response status: ${res.status}`);
-
-      if (!res.ok) {
-        if (res.status === 404) {
-          throw new Error(`User "${username}" not found on the server. Make sure the username exists and is spelled correctly.`);
-        }
-
-        let errorMessage = `HTTP ${res.status}`;
-        try {
-          const contentType = res.headers.get('content-type');
-          if (contentType?.includes('application/json')) {
-            const errorData = await res.json();
-            console.error('Error details:', errorData);
-            errorMessage = parseErrorResponse(res.status, errorData);
-          } else {
-            const errorText = await res.text();
-            errorMessage = errorText || `HTTP ${res.status}`;
-          }
-        } catch (e) {
-          console.warn("Could not parse error response:", e);
-        }
-
-        throw new Error(errorMessage);
-      }
-
-      const data: PublicKeyResponse = await res.json();
-      console.log(`✅ Public key fetched successfully for ${username}`);
-      
-      if (!data.public_key) {
-        throw new Error('Server returned no public key');
-      }
-      return data.public_key;
-    } catch (error) {
-      if (error instanceof TypeError) {
-        console.error('Network error:', error);
-        throw new Error('Network error: Unable to reach the server. Check your internet connection and make sure the API URL is correct.');
-      }
-      if (error instanceof Error) {
-        throw error;
-      }
-      throw new Error('Failed to fetch public key');
-    }
+    if (!res.ok) throw new Error(await parseError(res));
+    const data = await res.json();
+    return data;
   },
 
-  sendMessage: async (sender: string, recipient: string, encryptedMessage: string): Promise<SendMessageResponse> => {
-    if (!sender || !recipient || !encryptedMessage) {
-      throw new Error('Sender, recipient, and message are required');
-    }
+  refreshToken: async (refresh_token: string): Promise<AuthResponse> => {
+    const res = await fetch(`${BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ refresh_token }),
+    });
 
-    try {
-      const cleanSender = sender.trim().toLowerCase();
-      const cleanRecipient = recipient.trim().toLowerCase();
-      
-      console.log(`📨 Sending message from "${cleanSender}" to "${cleanRecipient}"`);
-      console.log(`📍 API URL: ${BASE_URL}/messages/send`);
-
-      const payload = {
-        sender: cleanSender,
-        recipient: cleanRecipient,
-        message: encryptedMessage,
-      };
-
-      console.log('📤 Payload:', { sender: cleanSender, recipient: cleanRecipient, message: '(encrypted)' });
-
-      const res = await fetch(`${BASE_URL}/messages/send`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify(payload),
-      });
-
-      console.log(`📊 Response status: ${res.status}`);
-
-      if (!res.ok) {
-        let errorMessage = `HTTP ${res.status}`;
-        try {
-          const contentType = res.headers.get('content-type');
-          if (contentType?.includes('application/json')) {
-            const errorData = await res.json();
-            console.error('Error details:', errorData);
-            errorMessage = parseErrorResponse(res.status, errorData);
-          } else {
-            const errorText = await res.text();
-            errorMessage = errorText || `HTTP ${res.status}`;
-          }
-        } catch (e) {
-          console.warn("Could not parse error response:", e);
-        }
-
-        throw new Error(errorMessage);
-      }
-
-      const data = await res.json();
-      console.log("✅ Message sent successfully:", data);
-      return data;
-    } catch (error) {
-      if (error instanceof TypeError) {
-        console.error('Network error:', error);
-        throw new Error('Network error: Unable to reach the server. Check your internet connection.');
-      }
-      if (error instanceof Error) {
-        throw error;
-      }
-      throw new Error('Failed to send message');
-    }
+    if (!res.ok) throw new Error(await parseError(res));
+    return await res.json();
   },
 
-  getMessages: async (username: string): Promise<MessageData[]> => {
-    if (!username) {
-      throw new Error('Username is required');
-    }
+  logoutUser: async (refresh_token: string): Promise<void> => {
+    await fetch(`${BASE_URL}/auth/logout`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ refresh_token }),
+    }).catch(e => console.error('Logout error:', e));
+  },
 
-    try {
-      const cleanUsername = username.trim().toLowerCase();
-      const encodedUsername = encodeURIComponent(cleanUsername);
-      
-      console.log(`📬 Fetching messages for: "${cleanUsername}"`);
+  searchUsers: async (query: string): Promise<UserProfile[]> => {
+    if (!query) return [];
+    const encodedQuery = encodeURIComponent(query);
+    const res = await fetch(`${BASE_URL}/users/search?q=${encodedQuery}`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
 
-      const res = await fetch(`${BASE_URL}/messages/inbox/${encodedUsername}`, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' },
-      });
+    if (!res.ok) throw new Error(await parseError(res));
+    return await res.json();
+  },
 
-      if (!res.ok) {
-        if (res.status === 404) {
-          console.warn(`No messages endpoint available or no messages yet`);
-          return [];
-        }
+  getPublicKey: async (userId: string): Promise<string> => {
+    const encodedId = encodeURIComponent(userId);
+    const res = await fetch(`${BASE_URL}/users/${encodedId}/public-key`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
 
-        let errorMessage = `HTTP ${res.status}`;
-        try {
-          const contentType = res.headers.get('content-type');
-          if (contentType?.includes('application/json')) {
-            const errorData = await res.json();
-            errorMessage = parseErrorResponse(res.status, errorData);
-          } else {
-            const errorText = await res.text();
-            errorMessage = errorText || `HTTP ${res.status}`;
-          }
-        } catch (e) {
-          console.warn("Could not parse error response:", e);
-        }
+    if (!res.ok) throw new Error(await parseError(res));
+    const data: PublicKeyResponse = await res.json();
+    return data.public_key;
+  },
 
-        console.error('Error fetching messages:', errorMessage);
-        throw new Error(errorMessage);
-      }
+  getConversations: async (): Promise<Conversation[]> => {
+    const res = await fetch(`${BASE_URL}/conversations`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
 
-      const data = await res.json();
-      console.log(`✅ Fetched ${Array.isArray(data) ? data.length : 0} messages`);
-      return Array.isArray(data) ? data : data.messages || [];
-    } catch (error) {
-      if (error instanceof TypeError) {
-        console.error('Network error:', error);
-        throw new Error('Network error: Unable to reach the server');
-      }
-      if (error instanceof Error) {
-        throw error;
-      }
-      throw new Error('Failed to fetch messages');
-    }
+    if (!res.ok) throw new Error(await parseError(res));
+    return await res.json();
+  },
+
+  getConversationMessages: async (userId: string, before?: string): Promise<MessageData[]> => {
+    const encodedId = encodeURIComponent(userId);
+    const url = new URL(`${BASE_URL}/conversations/${encodedId}/messages`);
+    if (before) url.searchParams.append('before', before);
+    
+    const res = await fetch(url.toString(), {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
+
+    if (!res.ok) throw new Error(await parseError(res));
+    return await res.json();
+  },
+
+  sendRestMessage: async (payload: SendMessagePayload): Promise<MessageData> => {
+    const res = await fetch(`${BASE_URL}/messages`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) throw new Error(await parseError(res));
+    return await res.json();
   },
 };

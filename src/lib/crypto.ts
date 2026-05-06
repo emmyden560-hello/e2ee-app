@@ -104,6 +104,61 @@ export async function wrapPrivateKeyWithPassword(
 }
 
 /**
+ * Unwrap private key with password-derived AES-KW key
+ */
+export async function unwrapPrivateKey(
+  wrappedPrivateKeyBase64: string,
+  pbkdf2SaltBase64: string,
+  password: string
+): Promise<CryptoKey> {
+  const salt = Uint8Array.from(atob(pbkdf2SaltBase64), c => c.charCodeAt(0));
+  const packet = Uint8Array.from(atob(wrappedPrivateKeyBase64), c => c.charCodeAt(0));
+  
+  if (packet.length < 12) {
+    throw new Error('Invalid wrapped key format');
+  }
+
+  const iv = packet.slice(0, 12);
+  const encrypted = packet.slice(12);
+  const passwordBytes = new TextEncoder().encode(password);
+
+  const baseKey = await crypto.subtle.importKey(
+    "raw",
+    passwordBytes,
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+
+  const unwrappingKey = await crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt,
+      iterations: 250000,
+      hash: "SHA-256",
+    },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["decrypt"]
+  );
+
+  const pkcs8 = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv },
+    unwrappingKey,
+    encrypted
+  );
+
+  return await crypto.subtle.importKey(
+    "pkcs8",
+    pkcs8,
+    { name: "RSA-OAEP", hash: "SHA-256" },
+    true,
+    ["decrypt"]
+  );
+}
+
+/**
  * PART 2: MESSAGE ENCRYPTION ENGINE
  * 
  * Encrypts a message using:
@@ -113,11 +168,18 @@ export async function wrapPrivateKeyWithPassword(
  * Packet structure:
  * [IV(12 bytes)] + [EncRecipient(256 bytes)] + [EncSender(256 bytes)] + [Ciphertext(variable)]
  */
+export interface EncryptedPayload {
+  encryptedKey: string;
+  encryptedKeyForSelf: string;
+  ciphertext: string;
+  iv: string;
+}
+
 export async function encryptMessage(
   plaintext: string,
   recipientPubKeyBase64: string,
-  senderPubKeyBase64: string // Required so sender can read their own sent messages
-): Promise<string> {
+  senderPubKeyBase64: string
+): Promise<EncryptedPayload> {
   try {
     if (!plaintext || plaintext.trim().length === 0) {
       throw new Error('Message cannot be empty');
@@ -177,25 +239,12 @@ export async function encryptMessage(
       exportedAesKey
     );
 
-    // 5. Pack the packet: [IV] + [EncRecipient] + [EncSender] + [Ciphertext]
-    const packet = new Uint8Array(
-      iv.length +
-      encryptedAesKeyRecipient.byteLength +
-      encryptedAesKeySender.byteLength +
-      encryptedContent.byteLength
-    );
-
-    let offset = 0;
-    packet.set(iv, offset);
-    offset += iv.length;
-    packet.set(new Uint8Array(encryptedAesKeyRecipient), offset);
-    offset += 256;
-    packet.set(new Uint8Array(encryptedAesKeySender), offset);
-    offset += 256;
-    packet.set(new Uint8Array(encryptedContent), offset);
-
-    // 6. Encode to Base64 for transmission
-    return btoa(String.fromCharCode(...packet));
+    return {
+      encryptedKey: toBase64(new Uint8Array(encryptedAesKeyRecipient)),
+      encryptedKeyForSelf: toBase64(new Uint8Array(encryptedAesKeySender)),
+      ciphertext: toBase64(new Uint8Array(encryptedContent)),
+      iv: toBase64(iv),
+    };
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Encryption failed';
     throw new Error(`Message encryption failed: ${msg}`);
@@ -209,45 +258,31 @@ export async function encryptMessage(
  * @param isSender - true if decrypting a message you sent, false if receiving
  */
 export async function decryptMessage(
-  encryptedBundleBase64: string,
-  privateKey: CryptoKey,
-  isSender: boolean = false
+  payload: Omit<EncryptedPayload, 'encryptedKeyForSelf'>,
+  privateKey: CryptoKey
 ): Promise<string> {
   try {
-    if (!encryptedBundleBase64 || encryptedBundleBase64.trim().length === 0) {
-      throw new Error('Encrypted message is empty');
+    if (!payload.encryptedKey || !payload.ciphertext || !payload.iv) {
+      throw new Error('Encrypted payload is missing required fields');
     }
 
     if (!privateKey) {
       throw new Error('Private key is required for decryption');
     }
 
-    // 1. Decode the Base64 bundle
-    const bundle = Uint8Array.from(atob(encryptedBundleBase64), c => c.charCodeAt(0));
+    // 1. Decode the Base64 strings
+    const iv = Uint8Array.from(atob(payload.iv), c => c.charCodeAt(0));
+    const encryptedAesKey = Uint8Array.from(atob(payload.encryptedKey), c => c.charCodeAt(0));
+    const ciphertext = Uint8Array.from(atob(payload.ciphertext), c => c.charCodeAt(0));
 
-    // Validate bundle size
-    const minSize = 12 + 256 + 256; // IV + 2 encrypted keys
-    if (bundle.length < minSize) {
-      throw new Error('Invalid encrypted message format: too short');
-    }
-
-    // 2. Unpack the bundle
-    const iv = bundle.slice(0, 12);
-
-    // If we are the sender, use the second encrypted key block
-    // Otherwise (recipient), use the first encrypted key block
-    const keyOffset = isSender ? 12 + 256 : 12;
-    const encryptedAesKey = bundle.slice(keyOffset, keyOffset + 256);
-    const ciphertext = bundle.slice(12 + 256 + 256);
-
-    // 3. Decrypt the AES Key using our private key
+    // 2. Decrypt the AES Key using our private key
     const aesKeyRaw = await window.crypto.subtle.decrypt(
       { name: "RSA-OAEP" },
       privateKey,
       encryptedAesKey
     );
 
-    // 4. Import the decrypted AES key
+    // 3. Import the decrypted AES key
     const aesKey = await window.crypto.subtle.importKey(
       "raw",
       aesKeyRaw,
@@ -256,7 +291,7 @@ export async function decryptMessage(
       ["decrypt"]
     );
 
-    // 5. Decrypt the message content
+    // 4. Decrypt the message content
     const decryptedContent = await window.crypto.subtle.decrypt(
       { name: "AES-GCM", iv },
       aesKey,
