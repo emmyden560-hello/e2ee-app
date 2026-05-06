@@ -15,22 +15,17 @@ export async function setupNewAccount(username: string, password: string) {
   }
 
   try {
-    console.log("🔐 Generating RSA key pair...");
     const pair = await generateIdentityKeys();
     
-    console.log("🔒 Storing private key securely...");
     await savePrivateKey(pair.privateKey);
     
-    console.log("📤 Exporting public key...");
     const pubKeyString = await exportPublicKey(pair.publicKey);
 
-    console.log("🧩 Wrapping private key...");
     const { wrappedPrivateKey, pbkdf2Salt } = await wrapPrivateKeyWithPassword(
       pair.privateKey,
       password
     );
 
-    console.log("📡 Registering with backend...");
     const response = await api.registerUser({
       username: username.trim(),
       display_name: username.trim(),
@@ -50,13 +45,11 @@ export async function setupNewAccount(username: string, password: string) {
     // Connect WebSocket
     wsManager.connect();
     
-    console.log("✅ Account setup complete!");
     return { success: true, user: response.user };
   } catch (error) {
     localStorage.removeItem('whisper_username');
     localStorage.removeItem('whisper_user_id');
     const errorMsg = error instanceof Error ? error.message : 'Unknown error during account setup';
-    console.error("❌ Onboarding failed:", errorMsg);
     throw new Error(errorMsg);
   }
 }
@@ -73,21 +66,24 @@ export async function loginExistingAccount(username: string, password: string) {
   }
 
   try {
-    console.log("📡 Logging in...");
     const response = await api.loginUser(username.trim(), password);
     
-    if (!response.wrapped_private_key || !response.pbkdf2_salt) {
-      throw new Error("Server did not return key material required to log in.");
+    // Validate response has required auth fields
+    if (!response.access_token || !response.refresh_token) {
+      throw new Error("Invalid login response: missing authentication tokens");
     }
     
-    console.log("🧩 Unwrapping private key...");
+    // Validate response has required key material
+    if (!response.wrapped_private_key || !response.pbkdf2_salt) {
+      throw new Error("Server did not return encryption key material. Contact support if this persists.");
+    }
+    
     const privateKey = await unwrapPrivateKey(
       response.wrapped_private_key,
       response.pbkdf2_salt,
       password
     );
     
-    console.log("🔒 Storing private key securely...");
     await savePrivateKey(privateKey);
     
     // Fetch user's public key (to cache it locally like during registration)
@@ -103,11 +99,9 @@ export async function loginExistingAccount(username: string, password: string) {
     // Connect WebSocket
     wsManager.connect();
     
-    console.log("✅ Login complete!");
     return { success: true, user: response.user };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error during login';
-    console.error("❌ Login failed:", errorMsg);
     throw new Error(errorMsg);
   }
 }

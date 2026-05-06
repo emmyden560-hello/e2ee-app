@@ -89,6 +89,22 @@ async function parseError(res: Response): Promise<string> {
   return errorMessage;
 }
 
+/**
+ * Handle fetch errors with better diagnostics
+ */
+function handleFetchError(error: unknown, endpoint: string): string {
+  if (error instanceof TypeError) {
+    if (error.message.includes('Failed to fetch')) {
+      return `Cannot connect to server at ${BASE_URL}. Check your internet connection and ensure the backend is running. Endpoint: ${endpoint}`;
+    }
+    if (error.message.includes('NetworkError')) {
+      return `Network error: Unable to reach the backend server at ${BASE_URL}`;
+    }
+  }
+  const errorMsg = error instanceof Error ? error.message : String(error);
+  return `Request failed: ${errorMsg}`;
+}
+
 // Token management helper
 const getAuthHeaders = () => {
   const token = typeof window !== 'undefined' ? localStorage.getItem('whisper_access_token') : null;
@@ -108,48 +124,59 @@ export const api = {
     wrapped_private_key: string;
     pbkdf2_salt: string;
   }): Promise<AuthResponse> => {
-    const res = await fetch(`${BASE_URL}/auth/register`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify(payload),
-    });
+    try {
+      const res = await fetch(`${BASE_URL}/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(payload),
+      });
 
-    if (!res.ok) throw new Error(await parseError(res));
-    const data = await res.json();
-    return data;
+      if (!res.ok) throw new Error(await parseError(res));
+      const data = await res.json();
+      return data;
+    } catch (error) {
+      throw new Error(handleFetchError(error, '/auth/register'));
+    }
   },
 
   loginUser: async (username: string, password?: string): Promise<AuthResponse> => {
-    // Some implementations might use form data for login, but we'll try JSON first based on instructions
-    const res = await fetch(`${BASE_URL}/auth/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify({ username, password }),
-    });
+    try {
+      const res = await fetch(`${BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ username, password }),
+      });
 
-    if (!res.ok) throw new Error(await parseError(res));
-    const data = await res.json();
-    return data;
+      if (!res.ok) throw new Error(await parseError(res));
+      const data = await res.json();
+      return data;
+    } catch (error) {
+      throw new Error(handleFetchError(error, '/auth/login'));
+    }
   },
 
   refreshToken: async (refresh_token: string): Promise<AuthResponse> => {
-    const res = await fetch(`${BASE_URL}/auth/refresh`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify({ refresh_token }),
-    });
+    try {
+      const res = await fetch(`${BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ refresh_token }),
+      });
 
-    if (!res.ok) throw new Error(await parseError(res));
-    return await res.json();
+      if (!res.ok) throw new Error(await parseError(res));
+      return await res.json();
+    } catch (error) {
+      throw new Error(handleFetchError(error, '/auth/refresh'));
+    }
   },
 
   logoutUser: async (refresh_token: string): Promise<void> => {
@@ -162,60 +189,80 @@ export const api = {
 
   searchUsers: async (query: string): Promise<UserProfile[]> => {
     if (!query) return [];
-    const encodedQuery = encodeURIComponent(query);
-    const res = await fetch(`${BASE_URL}/users/search?q=${encodedQuery}`, {
-      method: 'GET',
-      headers: getAuthHeaders(),
-    });
+    try {
+      const encodedQuery = encodeURIComponent(query);
+      const res = await fetch(`${BASE_URL}/users/search?q=${encodedQuery}`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      });
 
-    if (!res.ok) throw new Error(await parseError(res));
-    return await res.json();
+      if (!res.ok) throw new Error(await parseError(res));
+      return await res.json();
+    } catch (error) {
+      throw new Error(handleFetchError(error, '/users/search'));
+    }
   },
 
   getPublicKey: async (userId: string): Promise<string> => {
-    const encodedId = encodeURIComponent(userId);
-    const res = await fetch(`${BASE_URL}/users/${encodedId}/public-key`, {
-      method: 'GET',
-      headers: getAuthHeaders(),
-    });
+    try {
+      const encodedId = encodeURIComponent(userId);
+      const res = await fetch(`${BASE_URL}/users/${encodedId}/public-key`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      });
 
-    if (!res.ok) throw new Error(await parseError(res));
-    const data: PublicKeyResponse = await res.json();
-    return data.public_key;
+      if (!res.ok) throw new Error(await parseError(res));
+      const data: PublicKeyResponse = await res.json();
+      return data.public_key;
+    } catch (error) {
+      throw new Error(handleFetchError(error, '/users/:id/public-key'));
+    }
   },
 
   getConversations: async (): Promise<Conversation[]> => {
-    const res = await fetch(`${BASE_URL}/conversations`, {
-      method: 'GET',
-      headers: getAuthHeaders(),
-    });
+    try {
+      const res = await fetch(`${BASE_URL}/conversations`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      });
 
-    if (!res.ok) throw new Error(await parseError(res));
-    return await res.json();
+      if (!res.ok) throw new Error(await parseError(res));
+      return await res.json();
+    } catch (error) {
+      throw new Error(handleFetchError(error, '/conversations'));
+    }
   },
 
   getConversationMessages: async (userId: string, before?: string): Promise<MessageData[]> => {
-    const encodedId = encodeURIComponent(userId);
-    const url = new URL(`${BASE_URL}/conversations/${encodedId}/messages`);
-    if (before) url.searchParams.append('before', before);
-    
-    const res = await fetch(url.toString(), {
-      method: 'GET',
-      headers: getAuthHeaders(),
-    });
+    try {
+      const encodedId = encodeURIComponent(userId);
+      const url = new URL(`${BASE_URL}/conversations/${encodedId}/messages`);
+      if (before) url.searchParams.append('before', before);
+      
+      const res = await fetch(url.toString(), {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      });
 
-    if (!res.ok) throw new Error(await parseError(res));
-    return await res.json();
+      if (!res.ok) throw new Error(await parseError(res));
+      return await res.json();
+    } catch (error) {
+      throw new Error(handleFetchError(error, '/conversations/:userId/messages'));
+    }
   },
 
   sendRestMessage: async (payload: SendMessagePayload): Promise<MessageData> => {
-    const res = await fetch(`${BASE_URL}/messages`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(payload),
-    });
+    try {
+      const res = await fetch(`${BASE_URL}/messages`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload),
+      });
 
-    if (!res.ok) throw new Error(await parseError(res));
-    return await res.json();
+      if (!res.ok) throw new Error(await parseError(res));
+      return await res.json();
+    } catch (error) {
+      throw new Error(handleFetchError(error, '/messages'));
+    }
   },
 };
