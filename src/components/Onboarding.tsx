@@ -81,7 +81,7 @@ export default function Onboarding({ onComplete }: { onComplete: (username: stri
                                 setErrorMessage('');
                             }}
                             disabled={status === 'loading'}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-green-500 text-slate-700 focus:border-transparent transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                         />
                     </div>
 
@@ -100,7 +100,7 @@ export default function Onboarding({ onComplete }: { onComplete: (username: stri
                                     setErrorMessage('');
                                 }}
                                 disabled={status === 'loading'}
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                                className="w-full px-4 py-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-green-500 text-slate-700 focus:border-transparent transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                             />
                             <button
                                 type="button"
