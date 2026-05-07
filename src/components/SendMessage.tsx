@@ -46,6 +46,17 @@ export default function SendMessage({ sender, recipient, onMessageSent }: SendMe
         setSuccess(false);
 
         try {
+            // IMMEDIATELY show the message to the sender (optimistic update)
+            const myUserId = localStorage.getItem('whisper_user_id');
+            window.dispatchEvent(new CustomEvent('message-sending', {
+                detail: {
+                    content: text,
+                    sender: myUserId,
+                    timestamp: new Date().toISOString(),
+                    recipient: recipient
+                }
+            }));
+
             console.log(`🚀 Starting message send process...`);
 
             // 1. Fetch recipient's Public Key from backend

@@ -115,6 +115,67 @@ const getAuthHeaders = () => {
   };
 };
 
+/**
+ * Enhanced fetch that handles token refresh on 401
+ */
+async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
+  const headers = {
+    ...getAuthHeaders(),
+    ...(options.headers || {}),
+  };
+
+  let res = await fetch(url, { ...options, headers });
+
+  // If unauthorized, attempt to refresh the token once
+  if (res.status === 401) {
+    const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('whisper_refresh_token') : null;
+    if (refreshToken) {
+      console.log('🔄 Access token expired, attempting refresh...');
+      try {
+        const refreshRes = await fetch(`${BASE_URL}/auth/refresh`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+
+        if (refreshRes.ok) {
+          const data: AuthResponse = await refreshRes.json();
+          if (data.access_token) {
+            localStorage.setItem('whisper_access_token', data.access_token);
+            if (data.refresh_token) {
+              localStorage.setItem('whisper_refresh_token', data.refresh_token);
+            }
+            
+            console.log('✅ Token refreshed successfully, retrying request');
+            
+            // Retry with new token
+            const retryHeaders = {
+              ...getAuthHeaders(),
+              ...(options.headers || {}),
+            };
+            res = await fetch(url, { ...options, headers: retryHeaders });
+          }
+        } else {
+          console.warn('❌ Token refresh failed - session expired');
+          // Clear tokens and notify UI
+          localStorage.removeItem('whisper_access_token');
+          localStorage.removeItem('whisper_refresh_token');
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('whisper_session_expired'));
+          }
+        }
+      } catch (e) {
+        console.error('❌ Error during token refresh:', e);
+      }
+    }
+  }
+
+  return res;
+}
+
 export const api = {
   registerUser: async (payload: {
     username: string;
@@ -181,18 +242,16 @@ export const api = {
 
   logoutUser: async (refresh_token: string): Promise<void> => {
     try {
-      const res = await fetch(`${BASE_URL}/auth/logout`, {
+      const res = await fetchWithAuth(`${BASE_URL}/auth/logout`, {
         method: 'POST',
-        headers: getAuthHeaders(),
         body: JSON.stringify({ refresh_token }),
       });
       // Don't throw on error - logout should succeed even if endpoint fails
       if (!res.ok) {
-        console.warn(`Logout endpoint returned ${res.status}: ${await res.text()}`);
+        console.warn(`Logout endpoint returned ${res.status}`);
       }
     } catch (e) {
-      // Network errors are OK during logout - we'll clear state anyway
-      console.warn('Logout request failed (this is OK):', e instanceof Error ? e.message : e);
+      console.warn('Logout request failed:', e instanceof Error ? e.message : e);
     }
   },
 
@@ -200,9 +259,8 @@ export const api = {
     if (!query) return [];
     try {
       const encodedQuery = encodeURIComponent(query);
-      const res = await fetch(`${BASE_URL}/users/search?q=${encodedQuery}`, {
+      const res = await fetchWithAuth(`${BASE_URL}/users/search?q=${encodedQuery}`, {
         method: 'GET',
-        headers: getAuthHeaders(),
       });
 
       if (!res.ok) throw new Error(await parseError(res));
@@ -215,9 +273,8 @@ export const api = {
   getPublicKey: async (userId: string): Promise<string> => {
     try {
       const encodedId = encodeURIComponent(userId);
-      const res = await fetch(`${BASE_URL}/users/${encodedId}/public-key`, {
+      const res = await fetchWithAuth(`${BASE_URL}/users/${encodedId}/public-key`, {
         method: 'GET',
-        headers: getAuthHeaders(),
       });
 
       if (!res.ok) throw new Error(await parseError(res));
@@ -230,9 +287,8 @@ export const api = {
 
   getConversations: async (): Promise<Conversation[]> => {
     try {
-      const res = await fetch(`${BASE_URL}/conversations`, {
+      const res = await fetchWithAuth(`${BASE_URL}/conversations`, {
         method: 'GET',
-        headers: getAuthHeaders(),
       });
 
       if (!res.ok) throw new Error(await parseError(res));
@@ -248,9 +304,8 @@ export const api = {
       const url = new URL(`${BASE_URL}/conversations/${encodedId}/messages`);
       if (before) url.searchParams.append('before', before);
       
-      const res = await fetch(url.toString(), {
+      const res = await fetchWithAuth(url.toString(), {
         method: 'GET',
-        headers: getAuthHeaders(),
       });
 
       if (!res.ok) throw new Error(await parseError(res));
@@ -262,9 +317,8 @@ export const api = {
 
   sendRestMessage: async (payload: SendMessagePayload): Promise<MessageData> => {
     try {
-      const res = await fetch(`${BASE_URL}/messages`, {
+      const res = await fetchWithAuth(`${BASE_URL}/messages`, {
         method: 'POST',
-        headers: getAuthHeaders(),
         body: JSON.stringify(payload),
       });
 

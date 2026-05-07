@@ -52,8 +52,21 @@ export default function Home() {
       }
     };
 
+    // Handle session expiration
+    const handleSessionExpired = () => {
+      console.warn('Session expired - logging out');
+      setCurrentUser(null);
+      setConversations([]);
+      setSelectedChat(null);
+    };
+
     window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    window.addEventListener('whisper_session_expired', handleSessionExpired);
+    
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('whisper_session_expired', handleSessionExpired);
+    };
   }, []);
 
   const loadConversations = async () => {

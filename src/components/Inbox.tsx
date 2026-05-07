@@ -20,6 +20,11 @@ export default function Inbox({ recipientId }: { recipientId: string }) {
     const [messages, setMessages] = useState<DecryptedMessage[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [myUserId, setMyUserId] = useState<string | null>(null);
+
+    useEffect(() => {
+        setMyUserId(localStorage.getItem('whisper_user_id'));
+    }, []);
 
     const fetchAndDecrypt = async () => {
         setLoading(true);
@@ -38,13 +43,13 @@ export default function Inbox({ recipientId }: { recipientId: string }) {
                 throw new Error("Private key is missing from IndexedDB. Your identity may have been reset.");
             }
 
-            const myUserId = localStorage.getItem('whisper_user_id');
+            const currentUserId = localStorage.getItem('whisper_user_id');
 
             // Map through messages and attempt decryption
             const decryptedList = await Promise.all(
                 encryptedData.map(async (msg: MessageData, index: number) => {
                     try {
-                        const isSender = msg.from_user_id === myUserId;
+                        const isSender = msg.from_user_id === currentUserId;
                         // For decryption, we need the encryptedKey. If we are the sender, we use encryptedKeyForSelf.
                         const keyToUse = isSender && msg.payload.encryptedKeyForSelf
                             ? msg.payload.encryptedKeyForSelf
@@ -93,16 +98,33 @@ export default function Inbox({ recipientId }: { recipientId: string }) {
 
         fetchAndDecrypt();
 
-        // Subscribe to WebSocket
+        // Listen for optimistic message updates (when user sends a message)
+        const handleMessageSending = (event: Event) => {
+            const customEvent = event as CustomEvent;
+            const { content, sender, timestamp, recipient } = customEvent.detail;
+
+            // Only add message if it's for the current conversation
+            if (recipient === recipientId) {
+                const newMsg: DecryptedMessage = {
+                    id: `optimistic-${timestamp}`,
+                    sender: sender,
+                    content: content,
+                    timestamp: timestamp
+                };
+                setMessages(prev => [...prev, newMsg]);
+            }
+        };
+
+        // Subscribe to WebSocket for other incoming messages
         const unsubscribe = wsManager.subscribe(async (msg: WSMessageReceivePayload) => {
-            const myUserId = localStorage.getItem('whisper_user_id');
+            const currentUserId = localStorage.getItem('whisper_user_id');
             // Only process messages for the current conversation
             if (msg.from_user_id === recipientId || msg.to_user_id === recipientId) {
                 try {
                     const privKey = await getPrivateKey();
                     if (!privKey) return;
 
-                    const isSender = msg.from_user_id === myUserId;
+                    const isSender = msg.from_user_id === currentUserId;
                     const keyToUse = isSender && msg.payload.encryptedKeyForSelf
                         ? msg.payload.encryptedKeyForSelf
                         : msg.payload.encryptedKey;
@@ -119,7 +141,23 @@ export default function Inbox({ recipientId }: { recipientId: string }) {
                         timestamp: msg.created_at
                     };
 
-                    setMessages(prev => [...prev, newDecryptedMsg]);
+                    // Replace optimistic messages with real ones
+                    setMessages(prev => {
+                        if (newDecryptedMsg.sender === currentUserId) {
+                            // Remove optimistic messages when we get the real one back
+                            const filtered = prev.filter(m => !m.id.startsWith('optimistic-'));
+                            // Add the real message if not already there
+                            if (!filtered.some(m => m.id === msg.id)) {
+                                return [...filtered, newDecryptedMsg];
+                            }
+                            return filtered;
+                        }
+                        // For received messages, just add if not already there
+                        if (!prev.some(m => m.id === msg.id)) {
+                            return [...prev, newDecryptedMsg];
+                        }
+                        return prev;
+                    });
                 } catch (err) {
                     console.error("Failed to decrypt incoming WS message", err);
                     setMessages(prev => [...prev, {
@@ -133,17 +171,19 @@ export default function Inbox({ recipientId }: { recipientId: string }) {
             }
         });
 
-        return () => unsubscribe();
+        window.addEventListener('message-sending', handleMessageSending);
+
+        return () => {
+            unsubscribe();
+            window.removeEventListener('message-sending', handleMessageSending);
+        };
     }, [recipientId]);
 
-    const myUserId = typeof window !== 'undefined' ? localStorage.getItem('whisper_user_id') : null;
-
     return (
-        <div className="w-full md:flex-1 bg-gray-50 flex flex-col h-screen md:h-auto">
-            {/* Messages Container */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+        <div className="flex flex-col h-full bg-gray-50">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {error && (
-                    <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3 sticky top-0">
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
                         <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
                         <p className="text-sm text-red-700">{error}</p>
                     </div>

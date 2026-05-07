@@ -85,8 +85,8 @@ export async function loginExistingAccount(username: string, password: string) {
     
     // If backend didn't return key material, try to retrieve from localStorage (stored during registration)
     if (!wrappedPrivateKey || !pbkdf2Salt) {
-      wrappedPrivateKey = localStorage.getItem(`whisper_wrapped_key_${cleanUsername}`);
-      pbkdf2Salt = localStorage.getItem(`whisper_salt_${cleanUsername}`);
+      wrappedPrivateKey = localStorage.getItem(`whisper_wrapped_key_${cleanUsername}`) ?? undefined;
+      pbkdf2Salt = localStorage.getItem(`whisper_salt_${cleanUsername}`) ?? undefined;
     }
     
     if (!wrappedPrivateKey || !pbkdf2Salt) {
@@ -108,15 +108,17 @@ export async function loginExistingAccount(username: string, password: string) {
     // Store private key securely
     await savePrivateKey(privateKey);
     
+    // Cache tokens immediately so subsequent API calls (like getPublicKey) have the Authorization header
+    localStorage.setItem('whisper_access_token', response.access_token);
+    localStorage.setItem('whisper_refresh_token', response.refresh_token);
+    
     // Fetch user's public key (to cache it locally like during registration)
     const pubKeyString = await api.getPublicKey(response.user.id);
     
-    // Cache identity material and tokens (only after successful key unwrap)
+    // Cache identity material (only after successful key unwrap)
     localStorage.setItem('whisper_user_id', response.user.id);
     localStorage.setItem('whisper_username', response.user.username);
     localStorage.setItem('whisper_public_key', pubKeyString);
-    localStorage.setItem('whisper_access_token', response.access_token);
-    localStorage.setItem('whisper_refresh_token', response.refresh_token);
     
     // Connect WebSocket only after successful login
     wsManager.connect();
@@ -148,21 +150,17 @@ export async function logoutUser() {
     // Logout should always succeed client-side, even if backend call fails
     console.warn('Backend logout notification failed, but local state will persist');
   } finally {
-    // IMPORTANT: Do NOT disconnect WebSocket - keep it running so reconnection is seamless
-    // IMPORTANT: Do NOT clear tokens - keep them so WebSocket can use them to reconnect
-    // The WebSocket will keep attempting to reconnect with the stored token
-    // User UI will show logout, but backend connection persists
+    // Disconnect WebSocket and clear session
+    wsManager.disconnect();
     
-    // Only clear UI state
-    const username = localStorage.getItem('whisper_username');
+    // Clear all identity material and tokens
     localStorage.removeItem('whisper_user_id');
     localStorage.removeItem('whisper_username');
     localStorage.removeItem('whisper_public_key');
+    localStorage.removeItem('whisper_access_token');
+    localStorage.removeItem('whisper_refresh_token');
     
-    // DO NOT REMOVE THESE - They allow WebSocket to keep running:
-    // localStorage.removeItem('whisper_access_token');
-    // localStorage.removeItem('whisper_refresh_token');
-    
-    // Don't clear the wrapped key/salt - user might want to log back in
+    // Note: We keep whisper_wrapped_key_{username} and whisper_salt_{username} 
+    // to allow easier login for the same user, which is standard practice.
   }
 }
