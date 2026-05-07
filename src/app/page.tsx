@@ -179,7 +179,7 @@ export default function Home() {
       {/* Desktop Header */}
       <div className="hidden md:flex items-center justify-between bg-green-500 text-white px-4 py-3 fixed top-0 left-0 right-0 h-16 z-10 border-b border-gray-200">
         <div className="flex items-center gap-2">
-          <h1 className="text-xl font-bold">WhisperBox</h1>
+          <h1 className="text-xl font-bold">E2EE - Messenger</h1>
         </div>
         <div className="flex items-center gap-2">
           <span className="mr-4 text-sm font-medium">@{currentUser}</span>
